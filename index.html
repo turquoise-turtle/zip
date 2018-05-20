@@ -1,0 +1,63 @@
+	<style>
+		/*a lot of these styles come from view-source:https://css-tricks.com/examples/DragAndDropFileUploading/*/
+		body {
+			font-family: sans-serif;
+			color: #0f3c4b;
+			padding: 5rem 1.25rem;
+			background-color: #e5edf1;
+		}
+		
+		.container {
+			/* background-color: #92b0b3; */
+			outline: 2px dashed #92b0b3;
+			outline-offset: -10px;
+			transition: outline-offset .15s ease-in-out, background-color .15s linear;
+			background-color: #c8dadf;
+			padding: 100px 20px;
+			box-sizing: border-box;
+			vertical-align: baseline;
+			border: 0;
+		}
+		#containerContainer {
+			width: 100%;
+			max-width: 680px;
+			text-align: center;
+			margin: 0 auto;
+			
+			font-size: 1.5rem;
+		}
+		
+		.animated {
+			outline-offset: -20px;
+			outline-color: #c8dadf;
+			background-color: #fff;
+		}
+		
+		label {
+			cursor: pointer;
+		}
+		
+		label:hover strong {
+			color: #39bfd3;
+		}
+		
+		p, a {
+			/*text-decoration: none;*/
+			font-style: italic;
+			color: #0f3c4b;
+			font-size: 0.75rem;
+		}
+	</style>
+	<section id="containerContainer">
+		<!--<label>Drag in or select a zip file, and the same zip file minus any hidden files will be downloaded</label>-->
+		<section class="container">
+			<!--<input type="file" id="fileElem" multiple webkitdirectory style="display: none" class="deleteme">-->
+			<input type="file" id="fileElem" style="display: none" class="deleteme" accept=".zip">
+			<label id="label" for="fileElem" class="deleteme"><strong>Select zip</strong> which has hidden files to remove</label>
+		</section>
+		<p>Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, and <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files.</p>
+	</section>
+	
+	<script src="alt.js"></script>
+	<script src="jszip.js"></script>
+	<script src="filesaver.js"></script>
