@@ -59,6 +59,7 @@ function dragleave(e) {
 function drop(e) {
   e.stopPropagation();
   e.preventDefault();
+  dropbox.classList.remove('animated');
 
   var dt = e.dataTransfer;
   var files = dt.files;
