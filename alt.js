@@ -12,11 +12,53 @@ function handleFiles(files) {
 	zip.loadAsync(fileblob)
 	.then(function(contents){
 		//console.log(contents);
+		
+		var xy = document.querySelector('#left');
+		var xz = document.querySelector('#right');
+		
+		var og = [];
+		var np = [];
+		
+		//https://stackoverflow.com/questions/13555785/remove-all-child-from-node-with-the-same-class-pure-js/13555954#13555954
+		var elements = document.getElementsByClassName('deleteme');
+		while (elements[0]) {
+			elements[0].parentNode.removeChild(elements[0]);
+		}
+		
+		if (document.querySelector('.hidden')) {
+			document.querySelector('.hidden').classList.remove('hidden');
+		}
+		
 		Object.keys(zip.files).forEach(function (filename) {
+			//var newchild = document.createElement('li');
+			//newchild.innerText = filename;
+			//xy.appendChild(newchild);
+			og.push(filename);
 			if (filename.indexOf('__MACOSX/') !== -1 || filename.indexOf('.DS_Store') !== -1) {
 				zip.remove(filename);
+				//xz.appendChild(newchild);
+			} else {
+				np.push(filename);
 			}
 		});
+		
+		for (var i of og) {
+			var newchild = document.createElement('li');
+			newchild.classList.add('deleteme');
+			newchild.innerText = i;
+			xy.appendChild(newchild);
+		}
+		document.querySelector('#itemsleft').innerText = og.length + ' items';
+		
+		for (var i of np) {
+			var newchild = document.createElement('li');
+			newchild.classList.add('deleteme');
+			newchild.innerText = i;
+			xz.appendChild(newchild);
+		}
+		document.querySelector('#itemsright').innerText = np.length + ' items';
+		
+		
 		console.log(zip);
 		/*zip.generateAsync({type:"base64"}).then(function (base64) {
 			location.href="data:application/zip;base64," + base64;
