@@ -64,9 +64,17 @@
 			flex-grow: 1;
 		}
 		
+		/*.flexcontainer label {
+			text-align: center;
+		}*/
+		
 		.hidden {
 			display: none;
 		}
+		.center {
+			text-align: center
+		}
+		
 	</style>
 	<section id="containerContainer">
 		<!--<label>Drag in or select a zip file, and the same zip file minus any hidden files will be downloaded</label>-->
@@ -75,7 +83,9 @@
 			<input type="file" id="fileElem" style="display: none" accept=".zip">
 			<label id="label" for="fileElem"><strong>Select zip</strong> which has hidden files to remove</label>
 		</section>
-		<section class="flexcontainer hidden">
+		
+	</section>
+	<section class="flexcontainer hidden">
 			<section class="list left">
 				<label>Original</label>
 				<p id="itemsleft"></p>
@@ -89,8 +99,7 @@
 				</ul>
 			</section>
 		</section>
-		<p>Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
-	</section>
+		<p class="center">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
 	
 	<script src="alt.js"></script>
 	<script src="jszip.js"></script>
