@@ -34,11 +34,11 @@
 			background-color: #fff;
 		}
 		
-		label {
+		.container label {
 			cursor: pointer;
 		}
 		
-		label:hover strong {
+		.container label:hover strong {
 			color: #39bfd3;
 		}
 		
@@ -48,13 +48,46 @@
 			color: #0f3c4b;
 			font-size: 0.75rem;
 		}
+		.list {
+			text-align: initial;
+			margin-top: 1rem;
+		}
+		.list li {
+			font-size: 0.9rem;
+		}
+		
+		.flexcontainer {
+			display: flex;
+			align-items: stretch;
+		}
+		.flexcontainer section {
+			flex-grow: 1;
+		}
+		
+		.hidden {
+			display: none;
+		}
 	</style>
 	<section id="containerContainer">
 		<!--<label>Drag in or select a zip file, and the same zip file minus any hidden files will be downloaded</label>-->
 		<section class="container">
 			<!--<input type="file" id="fileElem" multiple webkitdirectory style="display: none" class="deleteme">-->
-			<input type="file" id="fileElem" style="display: none" class="deleteme" accept=".zip">
-			<label id="label" for="fileElem" class="deleteme"><strong>Select zip</strong> which has hidden files to remove</label>
+			<input type="file" id="fileElem" style="display: none" accept=".zip">
+			<label id="label" for="fileElem"><strong>Select zip</strong> which has hidden files to remove</label>
+		</section>
+		<section class="flexcontainer hidden">
+			<section class="list left">
+				<label>Original</label>
+				<p id="itemsleft"></p>
+				<ul id="left">
+				</ul>
+			</section>
+			<section class="list right">
+				<label>Result</label>
+				<p id="itemsright"></p>
+				<ul id="right">
+				</ul>
+			</section>
 		</section>
 		<p>Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
 	</section>
