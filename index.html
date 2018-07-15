@@ -56,11 +56,13 @@
 			font-size: 0.9rem;
 		}
 		
-		.flexcontainer {
+		.flex {
 			display: flex;
+		}
+		.stretch {
 			align-items: stretch;
 		}
-		.flexcontainer section {
+		.flex section {
 			flex-grow: 1;
 		}
 		
@@ -72,12 +74,17 @@
 			display: none;
 		}
 		.center {
-			text-align: center
+			text-align: center;
+			justify-content: center;
+		}
+		
+		.reminput {
+			min-width: 1em;
+			background-color: #c8dadf;
 		}
 		
 	</style>
 	<section id="containerContainer">
-		<!--<label>Drag in or select a zip file, and the same zip file minus any hidden files will be downloaded</label>-->
 		<section class="container">
 			<!--<input type="file" id="fileElem" multiple webkitdirectory style="display: none" class="deleteme">-->
 			<input type="file" id="fileElem" style="display: none" accept=".zip">
@@ -85,21 +92,25 @@
 		</section>
 		
 	</section>
-	<section class="flexcontainer hidden">
-			<section class="list left">
-				<label>Original</label>
-				<p id="itemsleft"></p>
-				<ul id="left">
-				</ul>
-			</section>
-			<section class="list right">
-				<label>Result</label>
-				<p id="itemsright"></p>
-				<ul id="right">
-				</ul>
-			</section>
+	<section class="flex center" style="margin-top: .5em">
+		<input type="checkbox" id="remc">
+		Remove&nbsp;<div id="rem" class="reminput" type="text" contenteditable>-raw</div>&nbsp;from zip filename
+	</section>
+	<section class="flex stretch hidden">
+		<section class="list left">
+			<label>Original</label>
+			<p id="itemsleft"></p>
+			<ul id="left">
+			</ul>
 		</section>
-		<p class="center">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
+		<section class="list right">
+			<label>Result</label>
+			<p id="itemsright"></p>
+			<ul id="right">
+			</ul>
+		</section>
+	</section>
+	<p class="center">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
 	
 	<script src="alt.js"></script>
 	<script src="jszip.js"></script>

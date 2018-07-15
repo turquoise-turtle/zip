@@ -6,6 +6,12 @@ document.querySelector('#fileElem').addEventListener('change', function() {
 function handleFiles(files) {
 	var fileblob = files[0];
 	var name = fileblob.name;
+	
+	var namechange = document.querySelector('#remc').checked;
+	if (namechange) {
+		var query = document.querySelector('#rem').innerText;
+		name = name.replace(query, '');
+	}
 		
 	var zip = new JSZip();
 	
