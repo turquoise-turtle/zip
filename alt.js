@@ -22,9 +22,11 @@ function handleFiles(files) {
 		var xy = document.querySelector('#left');
 		var xz = document.querySelector('#right');
 		
+		//og is original, np is no problem (new list)
 		var og = [];
 		var np = [];
 		
+		//delete the previous lists, if any
 		//https://stackoverflow.com/questions/13555785/remove-all-child-from-node-with-the-same-class-pure-js/13555954#13555954
 		var elements = document.getElementsByClassName('deleteme');
 		while (elements[0]) {
@@ -36,13 +38,9 @@ function handleFiles(files) {
 		}
 		
 		Object.keys(zip.files).forEach(function (filename) {
-			//var newchild = document.createElement('li');
-			//newchild.innerText = filename;
-			//xy.appendChild(newchild);
 			og.push(filename);
 			if (filename.indexOf('__MACOSX/') !== -1 || filename.indexOf('.DS_Store') !== -1) {
 				zip.remove(filename);
-				//xz.appendChild(newchild);
 			} else {
 				np.push(filename);
 			}
@@ -66,9 +64,8 @@ function handleFiles(files) {
 		
 		
 		console.log(zip);
-		/*zip.generateAsync({type:"base64"}).then(function (base64) {
-			location.href="data:application/zip;base64," + base64;
-		});*/
+		
+		//location.href="data:application/zip;base64," + base64;
 		zip.generateAsync({type:"blob"})
 		.then(function(content) {
 			saveAs(content, name);
@@ -88,14 +85,14 @@ dropbox.addEventListener("drop", drop, false);
 dropbox.addEventListener("dragleave", dragleave, false);
 
 function dragenter(e) {
-  e.stopPropagation();
-  e.preventDefault();
+	e.stopPropagation();
+	e.preventDefault();
 }
 
 function dragover(e) {
-  e.stopPropagation();
-  e.preventDefault();
-  dropbox.classList.add('animated');
+	e.stopPropagation();
+	e.preventDefault();
+	dropbox.classList.add('animated');
 }
 
 function dragleave(e) {
@@ -105,11 +102,11 @@ function dragleave(e) {
 }
 
 function drop(e) {
-  e.stopPropagation();
-  e.preventDefault();
-  dropbox.classList.remove('animated');
+	e.stopPropagation();
+	e.preventDefault();
+	dropbox.classList.remove('animated');
 
-  var dt = e.dataTransfer;
-  var files = dt.files;
-  handleFiles(files);
+	var dt = e.dataTransfer;
+	var files = dt.files;
+	handleFiles(files);
 }
