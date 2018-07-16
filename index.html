@@ -78,9 +78,16 @@
 			justify-content: center;
 		}
 		
+		.rembox {
+			margin-top: .5em;
+		}
+		.default {
+			cursor: default;
+		}
 		.reminput {
 			min-width: 1em;
 			background-color: #c8dadf;
+			cursor: text;
 		}
 		
 	</style>
@@ -92,7 +99,7 @@
 		</section>
 		
 	</section>
-	<section class="flex center" style="margin-top: .5em">
+	<section class="flex center rembox default">
 		<input type="checkbox" id="remc">
 		Remove&nbsp;<div id="rem" class="reminput" type="text" contenteditable>-raw</div>&nbsp;from zip filename
 	</section>
@@ -110,7 +117,7 @@
 			</ul>
 		</section>
 	</section>
-	<p class="center">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
+	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
 	
 	<script src="alt.js"></script>
 	<script src="jszip.js"></script>
