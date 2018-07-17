@@ -1,6 +1,11 @@
 if ('serviceWorker' in navigator) {
 	window.addEventListener('load', function() {
-		navigator.serviceWorker.register('/zip/service-worker.js');
+		navigator.serviceWorker.register('/zip/service-worker.js')
+		.then(function (reg){
+			console.log('sw registered:', reg);
+		}, /*catch*/ function(error) {
+			console.log('Service worker registration failed:', error);
+		});
 	});
 }
 
