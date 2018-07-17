@@ -51,6 +51,12 @@ function update(request) {
   return caches.open(CACHE).then(function (cache) {
     return fetch(request).then(function (response) {
       return cache.put(request, response);
+    }).catch(function(error){
+    	console.log(error);
+    	//do nothing
+    	return new Promise(function(resolve,reject){
+    		resolve();
+    	});
     });
   });
 }
