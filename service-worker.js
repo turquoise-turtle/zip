@@ -30,9 +30,9 @@ function precache() {
       '/zip/alt.js',
       '/zip/jszip.js',
       '/zip/filesaver.js',
-      'favicon-16x16.png',
-      'favicon-32x32.png',
-      'favicon.ico'
+      '/zip/favicon-16x16.png',
+      '/zip/favicon-32x32.png',
+      '/zip/favicon.ico'
     ]);
   });
 }
