@@ -29,7 +29,10 @@ function precache() {
       '/zip/index.html',
       '/zip/alt.js',
       '/zip/jszip.js',
-      '/zip/filesaver.js'
+      '/zip/filesaver.js',
+      'favicon-16x16.png',
+      'favicon-32x32.png',
+      'favicon.ico'
     ]);
   });
 }
