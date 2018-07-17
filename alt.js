@@ -1,3 +1,9 @@
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/service-worker.js');
+  });
+}
+
 //foreach way
 document.querySelector('#fileElem').addEventListener('change', function() {
 	handleFiles(this.files);
