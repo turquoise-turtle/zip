@@ -1,7 +1,7 @@
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function() {
-    navigator.serviceWorker.register('/service-worker.js');
-  });
+	window.addEventListener('load', function() {
+		navigator.serviceWorker.register('/zip/service-worker.js');
+	});
 }
 
 //foreach way
