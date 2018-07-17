@@ -26,10 +26,10 @@ self.addEventListener('fetch', function(evt) {
 function precache() {
   return caches.open(CACHE).then(function (cache) {
     return cache.addAll([
-      '/index.html',
-      '/alt.js',
-      '/jszip.js',
-      '/filesaver.js'
+      '/zip/index.html',
+      '/zip/alt.js',
+      '/zip/jszip.js',
+      '/zip/filesaver.js'
     ]);
   });
 }
