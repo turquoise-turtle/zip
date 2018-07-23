@@ -43,6 +43,7 @@ function precache() {
 function fromCache(request) {
   return caches.open(CACHE).then(function (cache) {
     return cache.match(request).then(function (matching) {
+      console.log('fromcache request', request);
       return matching || Promise.reject('no-match');
     });
   });
