@@ -2,32 +2,62 @@
 	<link rel="icon" type="image/png" href="favicon-32x32.png" sizes="32x32" />
 	<link rel="icon" type="image/png" href="favicon-16x16.png" sizes="16x16" />
 	<!-- Icon is CC-BY VisualPharm https://findicons.com/icon/558618/zip -->
+	
+	<title>Remove hidden files from zip</title>
+	<!--
+/*
+#90AFC5 mist
+#336B87 stone
+#763626
+
+#F4CC70
+#DE7A22
+#20948B
+#6AB187
+
+#e5edf1 body
+#0f3c4b text
+
+#c8dadf container
+#92b0b3 outline
+
+*/
+
+-->
 	<style>
+		:root {
+			--bg: #90afc5;
+			--obg: #336B87;
+			--tc: #000;
+			--otc: #ffffff;
+			--otch: #00ffff;
+		}
+		
 		/*a lot of these styles come from view-source:https://css-tricks.com/examples/DragAndDropFileUploading/*/
 		body {
 			font-family: sans-serif;
-			color: #0f3c4b;
+			color: var(--tc);
 			padding: 5rem 1.25rem;
-			background-color: #e5edf1;
+			background-color: var(--bg);
 		}
 		
 		.container {
 			/* background-color: #92b0b3; */
-			outline: 2px dashed #92b0b3;
+			outline: 2px dashed #fff;
 			outline-offset: -10px;
 			transition: outline-offset .15s ease-in-out, background-color .15s linear;
-			background-color: #c8dadf;
+			background-color: var(--obg);
 			padding: 100px 20px;
 			box-sizing: border-box;
 			vertical-align: baseline;
 			border: 0;
+			color: var(--otc);
 		}
 		#containerContainer {
 			width: 100%;
 			max-width: 680px;
 			text-align: center;
 			margin: 0 auto;
-			
 			font-size: 1.5rem;
 		}
 		
@@ -42,13 +72,13 @@
 		}
 		
 		.container label:hover strong {
-			color: #39bfd3;
+			color: var(--otch);
 		}
 		
 		p, a {
 			/*text-decoration: none;*/
 			font-style: italic;
-			color: #0f3c4b;
+			color: var(--tc);
 			font-size: 0.75rem;
 		}
 		.list {
@@ -89,22 +119,26 @@
 		}
 		.reminput {
 			min-width: 1em;
-			background-color: #c8dadf;
+			background-color: var(--obg);
 			cursor: text;
+			color: var(--otc);
 		}
 		
 	</style>
 	<section id="containerContainer">
 		<section class="container">
-			<!--<input type="file" id="fileElem" multiple webkitdirectory style="display: none" class="deleteme">-->
 			<input type="file" id="fileElem" style="display: none" accept=".zip">
 			<label id="label" for="fileElem"><strong>Select zip</strong> which has hidden files to remove</label>
 		</section>
-		
 	</section>
-	<section class="flex center rembox default">
-		<input type="checkbox" id="remc">
-		Remove&nbsp;<div id="rem" class="reminput" type="text" contenteditable>-raw</div>&nbsp;from zip filename
+	<section class="center">
+		<section class="flex center rembox default">
+			<input type="checkbox" id="remc">
+			Remove&nbsp;<div id="rem" class="reminput" contenteditable>-raw</div>&nbsp;from zip filename
+		</section>
+		<div>
+			<p>A zip file will be downloaded with the hidden files removed.</p>
+		</div>
 	</section>
 	<section class="flex stretch hidden">
 		<section class="list left">
@@ -120,7 +154,7 @@
 			</ul>
 		</section>
 	</section>
-	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the basic look of this page, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href=""https://github.com/eligrey/FileSaver.js>FileSaver</a> for downloading the file.</p>
+	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the layout, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href="https://github.com/eligrey/FileSaver.js">FileSaver</a> for downloading the file.</p>
 	
 	<script src="alt.js"></script>
 	<script src="jszip.js"></script>
