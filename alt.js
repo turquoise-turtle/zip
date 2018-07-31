@@ -87,7 +87,6 @@ function handleFiles(files) {
 }
 
 var dropbox;
-
 dropbox = document.querySelector('.container');
 
 dropbox.addEventListener("dragenter", dragenter, false);
