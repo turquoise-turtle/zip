@@ -79,4 +79,5 @@ function doNotCache(request) {
 		result = true;
 	}
 	console.log(request.url, result);
+	return result;
 }
