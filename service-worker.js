@@ -74,7 +74,7 @@ function doNotCache(request) {
 	var doNotCacheList = [
 		'https://makerwidget.com/js/embed.js'
 	]
-	if (doNotCacheList.indexOf(request) > -1) {
+	if (doNotCacheList.indexOf(request.url) > -1) {
 		result = true;
 	}
 	console.log(request, result);
