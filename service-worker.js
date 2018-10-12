@@ -16,7 +16,8 @@ self.addEventListener('fetch', function(evt) {
   // You can use `respondWith()` to answer immediately, without waiting for the
   // network response to reach the service worker...
   if (doNotCache(evt.request)) {
-  	console.log(evt.request);
+  	//console.log(evt.request);
+  	evt.respondWith(fetch(evt.request))
   } else {
   	evt.respondWith(fromCache(evt.request));
   }
@@ -77,5 +78,5 @@ function doNotCache(request) {
 	if (doNotCacheList.indexOf(request.url) > -1) {
 		result = true;
 	}
-	console.log(request, result);
+	console.log(request.url, result);
 }
