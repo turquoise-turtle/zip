@@ -57,17 +57,22 @@ function fromCache(request) {
 // Update consists in opening the cache, performing a network request and
 // storing the new response data.
 function update(request) {
-  return caches.open(CACHE).then(function (cache) {
-    return fetch(request).then(function (response) {
-      return cache.put(request, response);
-    }).catch(function(error){
-    	console.log(error);
-    	//do nothing
-    	return new Promise(function(resolve,reject){
-    		resolve();
-    	});
-    });
-  });
+	if (navigator.onLine) {
+		return caches.open(CACHE).then(function (cache) {
+			return fetch(request).then(function (response) {
+				return cache.put(request, response);
+			}).catch(function(error){
+				console.log(error);
+				//do nothing
+				return new Promise(function(resolve,reject){
+					resolve();
+				});
+			});
+		});
+	}
+	return new Promise(function(resolve,reject){
+		resolve();
+	});
 }
 
 function doNotCache(request) {
