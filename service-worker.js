@@ -72,11 +72,14 @@ function update(request) {
 
 function doNotCache(request) {
 	var result = false;
+	var url = request.url;
 	var doNotCacheList = [
-		'https://makerwidget.com/js/embed.js'
+		'https://makerwidget.com'
 	]
-	if (doNotCacheList.indexOf(request.url) > -1) {
-		result = true;
+	for (var doNotCacheItem of doNotCacheList) {
+		if (url.indexOf(doNotCacheItem) > -1) {
+			result = true;
+		}
 	}
 	console.log(request.url, result);
 	return result;
