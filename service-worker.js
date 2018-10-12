@@ -15,7 +15,11 @@ self.addEventListener('fetch', function(evt) {
   console.log('The service worker is serving the asset.');
   // You can use `respondWith()` to answer immediately, without waiting for the
   // network response to reach the service worker...
-  evt.respondWith(fromCache(evt.request));
+  if (doNotCache(evt.request)) {
+  	console.log(evt.request);
+  } else {
+  	evt.respondWith(fromCache(evt.request));
+  }
   // ...and `waitUntil()` to prevent the worker from being killed until the
   // cache is updated.
   evt.waitUntil(update(evt.request));
@@ -63,4 +67,14 @@ function update(request) {
     	});
     });
   });
+}
+
+function doNotCache(request) {
+	var doNotCacheList = [
+		'https://makerwidget.com/js/embed.js'
+	]
+	if (doNotCacheList.indexOf(request) > -1) {
+		return true;
+	}
+	return false;
 }
