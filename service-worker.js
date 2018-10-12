@@ -12,7 +12,7 @@ self.addEventListener('install', function(evt) {
 // On fetch, use cache but update the entry with the latest contents
 // from the server.
 self.addEventListener('fetch', function(evt) {
-  console.log('The service worker is serving the asset.');
+  //console.log('The service worker is serving the asset.');
   // You can use `respondWith()` to answer immediately, without waiting for the
   // network response to reach the service worker...
   if (doNotCache(evt.request)) {
@@ -70,11 +70,12 @@ function update(request) {
 }
 
 function doNotCache(request) {
+	var result = false;
 	var doNotCacheList = [
 		'https://makerwidget.com/js/embed.js'
 	]
 	if (doNotCacheList.indexOf(request) > -1) {
-		return true;
+		result = true;
 	}
-	return false;
+	console.log(request, result);
 }
