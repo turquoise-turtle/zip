@@ -1,91 +1,91 @@
-var CACHE = 'cache-and-update-zip';
+// Every cache this app makes starts with PREFIX. Other apps on turquoise-turtle.github.io (like /pdf/) share
+// the same cache storage, so this worker only ever touches caches with its own prefix.
+// Bump the version whenever any of the files below change, so everyone gets the new copy.
+var PREFIX = 'zip-';
+var CACHE = PREFIX + 'v2';
+// The cache name this app used before versioning
+var OLD_CACHE = 'cache-and-update-zip';
 
-// On install, cache some resources.
+// Relative to this file, so they stay inside /zip/
+var FILES = [
+  './',
+  'index.html',
+  'alt.js',
+  'clean.js',
+  'jszip.js',
+  'manifest.json',
+  'favicon-16x16.png',
+  'favicon-32x32.png',
+  'favicon.ico',
+  'zip.png',
+  'icon-192.png',
+  'icon-512.png'
+];
+
+// On install, cache everything the page needs to work offline, then take over straight away
+// instead of waiting for every open tab to close.
 self.addEventListener('install', function(evt) {
-  console.log('The service worker is being installed.');
-
-  // Ask the service worker to keep installing until the returning promise
-  // resolves.
-  evt.waitUntil(precache());
+  evt.waitUntil(
+    caches.open(CACHE).then(function(cache) {
+      return cache.addAll(FILES);
+    }).then(function() {
+      return self.skipWaiting();
+    })
+  );
 });
 
-// On fetch, use cache but update the entry with the latest contents
-// from the server.
+// On activate, delete this app's old caches (and nobody else's), then start handling open pages.
+self.addEventListener('activate', function(evt) {
+  evt.waitUntil(
+    caches.keys().then(function(keys) {
+      return Promise.all(keys.filter(function(key) {
+        return (key.indexOf(PREFIX) === 0 && key !== CACHE) || key === OLD_CACHE;
+      }).map(function(key) {
+        return caches.delete(key);
+      }));
+    }).then(function() {
+      return self.clients.claim();
+    })
+  );
+});
+
+// On fetch, answer from the cache straight away if we can, and refresh the cached copy from the
+// network in the background so the next visit is up to date.
 self.addEventListener('fetch', function(evt) {
-  //console.log('The service worker is serving the asset.');
-  // You can use `respondWith()` to answer immediately, without waiting for the
-  // network response to reach the service worker...
-  if (doNotCache(evt.request)) {
-  	//console.log(evt.request);
-  	evt.respondWith(fetch(evt.request))
-  } else {
-  	evt.respondWith(fromCache(evt.request));
+  var request = evt.request;
+  // Leave anything that isn't ours (other apps on this domain, other sites, non-GET requests) to the browser
+  if (request.method !== 'GET' || request.url.indexOf(self.registration.scope) !== 0) {
+    return;
   }
-  // ...and `waitUntil()` to prevent the worker from being killed until the
-  // cache is updated.
-  evt.waitUntil(update(evt.request));
+
+  var network = fetch(request);
+  // Only keep good responses, so a 404 or server error never replaces a working copy
+  var saved = network.then(function(response) {
+    if (response.ok) {
+      var copy = response.clone();
+      return caches.open(CACHE).then(function(cache) {
+        return cache.put(request, copy);
+      });
+    }
+  }).catch(function() {
+    // Offline, so there's nothing to update
+  });
+
+  evt.respondWith(
+    caches.open(CACHE).then(function(cache) {
+      return cache.match(request).then(function(matching) {
+        if (matching) {
+          return matching;
+        }
+        return network.catch(function(error) {
+          // Offline and not cached (like /zip/?something), so show the page if that's what was asked for
+          if (request.mode === 'navigate') {
+            return cache.match('index.html');
+          }
+          throw error;
+        });
+      });
+    })
+  );
+  evt.waitUntil(saved);
 });
-
-// Open a cache and use `addAll()` with an array of assets to add all of them
-// to the cache. Return a promise resolving when all the assets are added.
-function precache() {
-  return caches.open(CACHE).then(function (cache) {
-    return cache.addAll([
-      '/zip/index.html',
-      '/zip/alt.js',
-      '/zip/jszip.js',
-      '/zip/filesaver.js',
-      '/zip/favicon-16x16.png',
-      '/zip/favicon-32x32.png',
-      '/zip/favicon.ico'
-    ]);
-  });
-}
-
-// Open the cache where the assets were stored and search for the requested
-// resource. Notice that in case of no matching, the promise still resolves
-// but it does with `undefined` as value.
-function fromCache(request) {
-  return caches.open(CACHE).then(function (cache) {
-    return cache.match(request).then(function (matching) {
-      console.log('fromcache request', request);
-      return matching || Promise.reject('no-match');
-    });
-  });
-}
-
-// Update consists in opening the cache, performing a network request and
-// storing the new response data.
-function update(request) {
-	if (navigator.onLine) {
-		return caches.open(CACHE).then(function (cache) {
-			return fetch(request).then(function (response) {
-				return cache.put(request, response);
-			}).catch(function(error){
-				console.log(error);
-				//do nothing
-				return new Promise(function(resolve,reject){
-					resolve();
-				});
-			});
-		});
-	}
-	return new Promise(function(resolve,reject){
-		resolve();
-	});
-}
-
-function doNotCache(request) {
-	var result = false;
-	var url = request.url;
-	var doNotCacheList = [
-		'https://makerwidget.com'
-	]
-	for (var doNotCacheItem of doNotCacheList) {
-		if (url.indexOf(doNotCacheItem) > -1) {
-			result = true;
-		}
-	}
-	console.log(request.url, result);
-	return result;
-}

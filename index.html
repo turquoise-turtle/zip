@@ -1,4 +1,11 @@
 <!doctype html>
+<html lang="en-AU">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#336B87">
+	<link rel="manifest" href="manifest.json">
+	<link rel="apple-touch-icon" href="icon-192.png">
 	<link rel="icon" type="image/png" href="favicon-32x32.png" sizes="32x32" />
 	<link rel="icon" type="image/png" href="favicon-16x16.png" sizes="16x16" />
 	<!-- Icon is CC-BY VisualPharm https://findicons.com/icon/558618/zip -->
@@ -128,28 +135,86 @@
 			background-color: var(--obg);
 			cursor: text;
 			color: var(--otc);
+			/*make the text box look like the plain editable text it replaced*/
+			border: 0;
+			margin: 0;
+			padding: 0;
+			font: inherit;
+			box-sizing: content-box;
 		}
-		
+
+		/*hidden from view but still reachable with the keyboard and screen readers*/
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0 0 0 0);
+			white-space: nowrap;
+		}
+		#fileElem:focus-visible + label {
+			outline: 2px solid var(--otch);
+			outline-offset: 4px;
+		}
+		#fileElem:focus-visible + label strong {
+			color: var(--otch);
+		}
+
+		.status {
+			margin-top: .75em;
+			font-size: 1rem;
+		}
+		.status:empty {
+			display: none;
+		}
+		.status a {
+			color: inherit;
+			font-size: inherit;
+		}
+
+		.list li {
+			overflow-wrap: anywhere;
+		}
+		.list li.removed {
+			text-decoration: line-through;
+			opacity: .6;
+		}
+		.list li.more {
+			font-style: italic;
+		}
+
+		@media (max-width: 600px) {
+			body {
+				padding: 2.5rem 1rem;
+			}
+			#lists {
+				flex-direction: column;
+			}
+		}
+
 	</style>
+</head>
+<body>
 	<h2 class="center">Remove Hidden Files from Zip Folders</h2>
 	<section id="containerContainer">
 		<section class="container">
-			<input type="file" id="fileElem" style="display: none" accept=".zip">
+			<input type="file" id="fileElem" class="visually-hidden" accept=".zip,application/zip">
 			<label id="label" for="fileElem"><strong>Select zip</strong> which has hidden files to remove</label>
+			<div id="status" class="status" aria-live="polite"></div>
 		</section>
 	</section>
 	<section class="center">
 		<section class="flex center rembox default">
-			
+
 			<input type="checkbox" id="remc">
-			<label><label for="remc">Remove&nbsp;</label><div id="rem" class="reminput" contenteditable>-raw</div><label>&nbsp;from zip filename
-			</label>
+			<label for="remc">Remove&nbsp;</label><input type="text" id="rem" class="reminput" value="-raw" aria-label="Text to remove from the end of the zip filename" spellcheck="false" autocomplete="off"><label for="remc">&nbsp;from zip filename</label>
 		</section>
 		<div>
-			<p>A zip file will be downloaded with the hidden files removed.</p>
+			<p>A zip file will be downloaded with the hidden files removed. Works offline, and your files never leave your device.</p>
 		</div>
 	</section>
-	<section class="flex stretch hidden">
+	<section id="lists" class="flex stretch hidden">
 		<section class="list left">
 			<label>Original</label>
 			<p id="itemsleft"></p>
@@ -163,23 +228,8 @@
 			</ul>
 		</section>
 	</section>
-	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the layout, <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files and <a href="https://github.com/eligrey/FileSaver.js">FileSaver</a> for downloading the file.</p>
-	
+	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the layout and <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files.</p>
+
 	<script src="alt.js" defer></script>
-	<script src="jszip.js" defer></script>
-	<script src="filesaver.js" defer></script>
-<script>
-    (function(d, h, m){
-        var js, fjs = d.getElementsByTagName(h)[0];
-        if (d.getElementById(m)){return;}
-        js = d.createElement(h); js.id = m; js.src = 'https://makerwidget.com/js/embed.js';
-        js.onload = function(){
-            window.makerWidgetComInit({
-            position: 'left',
-            widget: 'hiayuviklmksxba0-z54bbicafujhwlc3-s0h9k5yamvczlbbf'
-        })};
-        if (navigator.onLine) {
-        	fjs.parentNode.insertBefore(js, fjs)
-        }
-    }(document, 'script', 'dhm'))
-</script>
+</body>
+</html>
