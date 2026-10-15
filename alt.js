@@ -50,12 +50,14 @@ function handleFiles(files) {
 		
 		Object.keys(zip.files).forEach(function (filename) {
 			og.push(filename);
-			if (filename.indexOf('__MACOSX/') !== -1 || filename.indexOf('.DS_Store') !== -1) {
+			//skip anything already removed along with a hidden folder
+			if (zip.files[filename] && isHidden(filename, zip.files[filename])) {
 				zip.remove(filename);
-			} else {
-				np.push(filename);
 			}
 		});
+		
+		//build the new list from what's left, because removing a hidden folder also removes everything inside it
+		np = Object.keys(zip.files);
 		
 		for (var i of og) {
 			var newchild = document.createElement('li');
@@ -84,6 +86,39 @@ function handleFiles(files) {
 	});
 	
 	
+}
+
+//files and folders windows makes behind the scenes (lowercase, because windows filenames aren't case sensitive)
+var windowsHidden = [
+	'thumbs.db',
+	'ehthumbs.db',
+	'ehthumbs_vista.db',
+	'desktop.ini',
+	'$recycle.bin',
+	'system volume information'
+];
+
+function isHidden(filename, file) {
+	//mac
+	if (filename.indexOf('__MACOSX/') !== -1 || filename.indexOf('.DS_Store') !== -1) {
+		return true;
+	}
+	
+	//windows, check every part of the path so things inside hidden folders get removed too
+	var parts = filename.toLowerCase().split('/');
+	for (var part of parts) {
+		if (windowsHidden.indexOf(part) !== -1) {
+			return true;
+		}
+	}
+	
+	//windows hidden attribute, only set when the zip was made on windows
+	//https://docs.microsoft.com/en-us/windows/desktop/fileio/file-attribute-constants (FILE_ATTRIBUTE_HIDDEN is 2)
+	if (file.dosPermissions && (file.dosPermissions & 2)) {
+		return true;
+	}
+	
+	return false;
 }
 
 var dropbox;
