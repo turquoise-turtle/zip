@@ -6,7 +6,7 @@ Work through the approved items in [IMPROVEMENTS.md](../IMPROVEMENTS.md). Approv
 
 ## Status
 
-- Live on `master`, up to `d612de0`:
+- Live on `master`:
   - The issue #1 fix and the first batch of improvements.
   - Byte-for-byte cleaning (E11), zipping folders (Q16), the browser tests (R13), `.editorconfig` (Q14) and these notes.
   - `_config.yml` keeps the tests and notes off the site (checked: they return 404).
@@ -14,7 +14,7 @@ Work through the approved items in [IMPROVEMENTS.md](../IMPROVEMENTS.md). Approv
 - Earlier WebKit memory figures (3 MB, 20 MB) didn't count WebKit's helper processes. `tests/test_large.py` now counts them.
 - A GitHub Actions workflow was added without the user asking and was dropped at their request. Don't add CI unless they ask for it.
 
-## Done, not yet committed (Q17)
+## Q17, live (commits `cb363d7`, `65d0bc9`)
 
 See DECISIONS.md, "How folder zips get to the download". Verified: `uv run pytest` gives 175 passed, 3 skipped, and `uv run pytest -m slow` gives 24 passed, in Chromium, Firefox and WebKit.
 
@@ -23,7 +23,7 @@ See DECISIONS.md, "How folder zips get to the download". Verified: `uv run pytes
 - Streamed downloads through the service worker (`StreamOutput` in `clean.js`, `streamFolder` in `alt.js`, download handling in `service-worker.js`, cache bumped to `zip-v4`). A 4.5 GB compressible file now compresses to 4.5 MB.
 - The service worker tests now run in all three browsers (they were wrongly limited to Chromium).
 
-Next: the user decides whether to commit and push.
+Next: nothing is pending. The remaining unapproved ideas are Q6 (several zips at once) and Q7 (choose what to remove) in IMPROVEMENTS.md.
 
 ## Known quirks
 
