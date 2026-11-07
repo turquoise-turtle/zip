@@ -78,7 +78,7 @@ fileElem.addEventListener('change', function() {
 
 function handleFiles(files) {
 	if (files.length !== 1) {
-		showStatus('Please choose one zip at a time.');
+		showStatus('Please choose one zip or folder at a time.');
 		return;
 	}
 	var file = files[0];
@@ -89,9 +89,7 @@ function handleFiles(files) {
 	var name = newName(file.name);
 
 	showStatus('Reading…', null, null, true);
-	runClean(file, function(percent) {
-		showStatus('Cleaning… ' + percent + '%', null, null, true);
-	})
+	startTask({type: 'clean', file: file})
 	.then(function(result) {
 		showResult(file, name, result);
 	}, function(error) {
@@ -99,18 +97,23 @@ function handleFiles(files) {
 	});
 }
 
-function showResult(file, name, result) {
-	var entries = result.entries;
+//shows everything in the Original list and what's left in the Result list, and returns what's left
+function showLists(entries) {
 	var kept = entries.filter(function(entry) {
 		return !entry.reason;
 	});
-
 	fillList(document.querySelector('#left'), entries);
 	document.querySelector('#itemsleft').textContent = plural(entries.length, 'item');
 	fillList(document.querySelector('#right'), kept);
 	document.querySelector('#itemsright').textContent = plural(kept.length, 'item');
 	document.querySelector('#lists').classList.remove('hidden');
+	return kept;
+}
 
+function showResult(file, name, result) {
+	var entries = result.entries;
+	var kept = showLists(entries);
+	
 	if (!result.blob) {
 		showStatus('Nothing to remove. This zip is already clean.');
 		return;
@@ -123,6 +126,103 @@ function showResult(file, name, result) {
 		summary += ', ' + formatSize(saved) + ' smaller';
 	}
 	showStatus(summary + '. ', result.blob, name);
+}
+
+//folders are zipped without their hidden files. items are {path, file}, with file null for an empty folder
+function handleFolder(folderName, items) {
+	if (!items.some(function(item) {
+		return item.file;
+	})) {
+		showStatus('That folder is empty.');
+		return;
+	}
+	var name = newName(folderName + '.zip');
+	
+	showStatus('Reading folder…', null, null, true);
+	startTask({type: 'folder', items: items}, function(percent) {
+		showStatus('Zipping… ' + percent + '%', null, null, true);
+	})
+	.then(function(result) {
+		var kept = showLists(result.entries);
+		if (!result.blob) {
+			showStatus('Everything in this folder is hidden junk, so there\'s nothing to zip.');
+			return;
+		}
+		download(result.blob, name);
+		var hidden = result.entries.length - kept.length;
+		var summary = 'Zipped ' + plural(kept.length, 'item');
+		summary += hidden ? ' and left out ' + hidden + ' hidden ' + (hidden === 1 ? 'one' : 'ones') : ', nothing hidden to leave out';
+		showStatus(summary + ' (' + formatSize(result.blob.size) + '). ', result.blob, name);
+	}, function(error) {
+		showStatus(error.message);
+	});
+}
+
+//picking folders is a progressive enhancement: desktop browsers can, but phones and tablets claim to support
+//it and then only let you pick files, so it's only offered on desktops
+var folderElem = document.querySelector('#folderElem');
+var mobile = (navigator.userAgentData && navigator.userAgentData.mobile) || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+	(/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+if ('webkitdirectory' in folderElem && !mobile) {
+	document.querySelector('label[for="folderElem"]').hidden = false;
+}
+
+folderElem.addEventListener('change', function() {
+	var files = Array.prototype.slice.call(this.files);
+	this.value = '';
+	if (!files.length) {
+		showStatus('That folder is empty.');
+		return;
+	}
+	var items = files.map(function(file) {
+		return {path: file.webkitRelativePath || file.name, file: file};
+	});
+	handleFolder(items[0].path.split('/')[0], items);
+}, false);
+
+//reads a dropped folder and everything in it
+function readFolder(root) {
+	var items = [];
+	function walk(folder) {
+		return readAllEntries(folder.createReader()).then(function(children) {
+			//keep empty folders, so the zip matches what was dropped
+			if (!children.length && folder !== root) {
+				items.push({path: folder.fullPath.slice(1) + '/', file: null});
+			}
+			return children.reduce(function(previous, child) {
+				return previous.then(function() {
+					if (child.isDirectory) {
+						return walk(child);
+					}
+					return new Promise(function(resolve, reject) {
+						child.file(resolve, reject);
+					}).then(function(file) {
+						items.push({path: child.fullPath.slice(1), file: file});
+					});
+				});
+			}, Promise.resolve());
+		});
+	}
+	return walk(root).then(function() {
+		return items;
+	});
+}
+
+//readEntries only hands out a batch at a time (100 in Chrome), so keep asking until there are no more
+function readAllEntries(reader) {
+	var all = [];
+	return new Promise(function(resolve, reject) {
+		(function next() {
+			reader.readEntries(function(batch) {
+				if (!batch.length) {
+					resolve(all);
+					return;
+				}
+				all = all.concat(batch);
+				next();
+			}, reject);
+		})();
+	});
 }
 
 //the message under "Select zip". blob and name add a "download again" link, busy stops screen readers reading every percent
@@ -206,14 +306,15 @@ var workerFailed = false;
 var jobCount = 0;
 var current = null;
 
-function runClean(file, onProgress) {
+//task is {type: 'clean', file} or {type: 'folder', items}, see runTask in clean.js
+function startTask(task, onProgress) {
 	return new Promise(function(resolve, reject) {
-		//a new zip replaces one that's still going
+		//a new job replaces one that's still going
 		if (current && worker) {
 			worker.terminate();
 			worker = null;
 		}
-		current = {id: ++jobCount, file: file, onProgress: onProgress, resolve: resolve, reject: reject};
+		current = {id: ++jobCount, task: task, onProgress: onProgress || function() {}, resolve: resolve, reject: reject};
 		startJob(current);
 	});
 }
@@ -221,12 +322,12 @@ function runClean(file, onProgress) {
 function startJob(job) {
 	var w = getWorker();
 	if (w) {
-		w.postMessage({id: job.id, file: job.file});
+		w.postMessage({id: job.id, task: job.task});
 		return;
 	}
 	loadMainThread()
 	.then(function() {
-		return cleanZip(job.file, function(percent) {
+		return runTask(job.task, function(percent) {
 			if (job === current) {
 				job.onProgress(percent);
 			}
@@ -291,9 +392,7 @@ function onWorkerError(e) {
 var mainThread = null;
 function loadMainThread() {
 	if (!mainThread) {
-		mainThread = loadScript('jszip.js').then(function() {
-			return loadScript('clean.js');
-		});
+		mainThread = loadScript('clean.js');
 	}
 	return mainThread;
 }
@@ -340,9 +439,29 @@ function drop(e) {
 	e.preventDefault();
 	dropbox.classList.remove('animated');
 
-	var dt = e.dataTransfer;
-	var files = dt.files;
-	handleFiles(files);
+	handleDrop(e.dataTransfer);
+}
+
+//dropped folders are zipped, anything else goes through handleFiles
+function handleDrop(dt) {
+	//entries have to be fetched straight away, while the drop event is still going
+	var entries = Array.prototype.slice.call(dt.items || []).map(function(item) {
+		return item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+	});
+	if (entries.length > 1) {
+		showStatus('Please choose one zip or folder at a time.');
+		return;
+	}
+	if (entries[0] && entries[0].isDirectory) {
+		showStatus('Reading folder…', null, null, true);
+		readFolder(entries[0]).then(function(items) {
+			handleFolder(entries[0].name, items);
+		}, function() {
+			showStatus('Couldn\'t read that folder.');
+		});
+		return;
+	}
+	handleFiles(dt.files);
 }
 
 //stop a zip dropped next to the box from opening in the browser and leaving the page

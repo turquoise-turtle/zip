@@ -153,14 +153,24 @@
 			clip: rect(0 0 0 0);
 			white-space: nowrap;
 		}
-		#fileElem:focus-visible + label {
+		.container input:focus-visible + label {
 			outline: 2px solid var(--otch);
 			outline-offset: 4px;
 		}
-		#fileElem:focus-visible + label strong {
+		.container input:focus-visible + label strong {
 			color: var(--otch);
 		}
 
+		/*only shown by alt.js in browsers that can pick folders*/
+		.folder {
+			display: block;
+			margin-top: .75em;
+			font-size: 1rem;
+		}
+		.folder[hidden] {
+			display: none;
+		}
+		
 		.status {
 			margin-top: .75em;
 			font-size: 1rem;
@@ -201,6 +211,8 @@
 		<section class="container">
 			<input type="file" id="fileElem" class="visually-hidden" accept=".zip,application/zip">
 			<label id="label" for="fileElem"><strong>Select zip</strong> which has hidden files to remove</label>
+			<input type="file" id="folderElem" class="visually-hidden" webkitdirectory>
+			<label class="folder" for="folderElem" hidden>or <strong>choose a folder</strong> to zip without them</label>
 			<div id="status" class="status" aria-live="polite"></div>
 		</section>
 	</section>
@@ -228,7 +240,7 @@
 			</ul>
 		</section>
 	</section>
-	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the layout and <a href="https://stuk.github.io/jszip/">JSZip</a> for working with zip files.</p>
+	<p class="center default">Thanks heaps to <a href="https://css-tricks.com/drag-and-drop-file-uploading/">CSS-Tricks</a> for the layout.</p>
 
 	<script src="alt.js" defer></script>
 </body>

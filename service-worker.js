@@ -2,7 +2,7 @@
 // the same cache storage, so this worker only ever touches caches with its own prefix.
 // Bump the version whenever any of the files below change, so everyone gets the new copy.
 var PREFIX = 'zip-';
-var CACHE = PREFIX + 'v2';
+var CACHE = PREFIX + 'v3';
 // The cache name this app used before versioning
 var OLD_CACHE = 'cache-and-update-zip';
 
@@ -12,7 +12,6 @@ var FILES = [
   'index.html',
   'alt.js',
   'clean.js',
-  'jszip.js',
   'manifest.json',
   'favicon-16x16.png',
   'favicon-32x32.png',
