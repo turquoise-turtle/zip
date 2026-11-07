@@ -1,0 +1,27 @@
+[project]
+name = "zip-tests"
+version = "0.1.0"
+description = "Browser tests for the zip cleaner. The site itself is plain HTML and JavaScript and needs no build."
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "psutil>=7.2.2",
+    "pytest>=9.2.0",
+    "pytest-playwright>=0.10.0",
+    "pytest-timeout>=2.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# every test runs in all three engines; the multi-gigabyte tests only run when asked for with -m slow
+addopts = "--browser chromium --browser firefox --browser webkit -m 'not slow' --timeout 180"
+filterwarnings = [
+    # some test zips repeat a name on purpose
+    "ignore:Duplicate name:UserWarning",
+    "ignore::pytest.PytestRemovedIn10Warning",
+]
+markers = [
+    "slow: multi-gigabyte tests that prove large zips and folders work (run with: uv run pytest -m slow)",
+]

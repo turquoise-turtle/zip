@@ -1,0 +1,6 @@
+# GitHub Pages builds this site with Jekyll. Only the app itself needs publishing, not the tests or notes
+exclude:
+  - tests
+  - pyproject.toml
+  - uv.lock
+  - IMPROVEMENTS.md
