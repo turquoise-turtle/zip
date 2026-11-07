@@ -191,3 +191,21 @@ def test_dropping_several_things(app):
     handleDrop({items: [{webkitGetAsEntry: () => fakeDir('A', [])}, {webkitGetAsEntry: () => fakeFile('b.zip')}], files: []});
     ''')
     assert wait_for_result(app) == 'Please choose one zip or folder at a time.'
+
+
+def test_reference_limit_falls_back_in_steps(app):
+    # clean.js normally only runs in the worker, so load it into the page to call it directly
+    app.add_script_tag(url='clean.js')
+    # pretend the browser can only read so many files into one blob, like Safari
+    limits = app.evaluate('''async () => {
+        const files = Array.from({length: 3000}, (_, i) => new File(['x'], `${i}.bin`));
+        const results = {};
+        for (const most of [5000, 2040, 700, 0]) {
+            const real = canRead;
+            canRead = list => Promise.resolve(list.length <= most);
+            results[most] = await referenceLimit(files);
+            canRead = real;
+        }
+        return results;
+    }''')
+    assert limits == {'5000': 3000, '2040': 1000, '700': 500, '0': 0}

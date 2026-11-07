@@ -88,7 +88,7 @@ function handleFiles(files) {
 	}
 	var name = newName(file.name);
 
-	showStatus('Reading…', null, null, true);
+	showStatus('Reading…', null, true);
 	startTask({type: 'clean', file: file})
 	.then(function(result) {
 		showResult(file, name, result);
@@ -125,11 +125,14 @@ function showResult(file, name, result) {
 	if (saved > 0) {
 		summary += ', ' + formatSize(saved) + ' smaller';
 	}
-	showStatus(summary + '. ', result.blob, name);
+	showStatus(summary + '. ', function() {
+		download(result.blob, name);
+	});
 }
 
 //folders are zipped without their hidden files. items are {path, file}, with file null for an empty folder
-function handleFolder(folderName, items) {
+//again is set for "Download again", where the folder is known to have something to zip
+function handleFolder(folderName, items, again) {
 	if (!items.some(function(item) {
 		return item.file;
 	})) {
@@ -138,23 +141,141 @@ function handleFolder(folderName, items) {
 	}
 	var name = newName(folderName + '.zip');
 	
-	showStatus('Reading folder…', null, null, true);
-	startTask({type: 'folder', items: items}, function(percent) {
-		showStatus('Zipping… ' + percent + '%', null, null, true);
+	showStatus('Reading folder…', null, true);
+	function progress(percent) {
+		showStatus('Zipping… ' + percent + '%', null, true);
+	}
+	//stream it straight into the download where the browser can, otherwise build it in memory
+	(canStream() ? streamFolder(items, name, progress, again) : Promise.resolve(null))
+	.then(function(result) {
+		return result || startTask({type: 'folder', items: items}, progress);
 	})
 	.then(function(result) {
 		var kept = showLists(result.entries);
-		if (!result.blob) {
+		if (!result.blob && !result.streamed) {
 			showStatus('Everything in this folder is hidden junk, so there\'s nothing to zip.');
 			return;
 		}
-		download(result.blob, name);
+		if (result.blob) {
+			download(result.blob, name);
+		}
 		var hidden = result.entries.length - kept.length;
 		var summary = 'Zipped ' + plural(kept.length, 'item');
 		summary += hidden ? ' and left out ' + hidden + ' hidden ' + (hidden === 1 ? 'one' : 'ones') : ', nothing hidden to leave out';
-		showStatus(summary + ' (' + formatSize(result.blob.size) + '). ', result.blob, name);
+		//a streamed zip isn't kept anywhere, so downloading it again makes it again
+		showStatus(summary + ' (' + formatSize(result.size) + '). ', function() {
+			if (result.blob) {
+				download(result.blob, name);
+			} else {
+				handleFolder(folderName, items, true);
+			}
+		});
 	}, function(error) {
 		showStatus(error.message);
+	});
+}
+
+//how long to wait for the browser to start a streamed download before building the zip in memory instead
+var streamStartTimeout = 5000;
+
+//streaming needs the service worker to be in charge of this page, which it isn't on the very first visit
+//until it's installed, and isn't at all in browsers or modes without service workers
+function canStream() {
+	return !!(navigator.serviceWorker && navigator.serviceWorker.controller) && typeof ReadableStream === 'function';
+}
+
+//streams a folder zip through the service worker into a download, so it's never held in memory and every
+//file can be compressed whatever its size. resolves with the job's result, or with null if the browser
+//didn't start the download, in which case the caller builds the zip in memory instead. now starts the download
+//straight away, while the click that asked for it still counts: browsers block downloads that come later
+//without one, if the site has already downloaded something
+function streamFolder(items, name, onProgress, now) {
+	var zip = new MessageChannel();
+	var page = new MessageChannel();
+	var id = Date.now() + String(Math.random()).slice(2);
+	navigator.serviceWorker.controller.postMessage({type: 'download', id: id, name: name}, [zip.port1, page.port2]);
+	
+	//the service worker says 'ready' once it knows about the download, then 'started' when the browser asks
+	//for it. the download can't be asked for before 'ready', because nothing makes the service worker handle
+	//this message before the download's request
+	var ready = null;
+	var onStarted = null;
+	var registered = new Promise(function(resolve) {
+		ready = resolve;
+	});
+	page.port1.onmessage = function(e) {
+		if (e.data === 'ready') {
+			ready();
+		} else if (e.data === 'started' && onStarted) {
+			onStarted(true);
+		}
+	};
+	var started = null;
+	var needed = null;
+	var downloadNeeded = new Promise(function(resolve) {
+		needed = resolve;
+	});
+	//the download only starts once there's something to put in it, so a folder of only junk doesn't
+	//start a download that then fails
+	function startDownload() {
+		if (started) {
+			return;
+		}
+		started = new Promise(function(resolve) {
+			onStarted = resolve;
+			setTimeout(function() {
+				resolve(false);
+			}, streamStartTimeout);
+			registered.then(function() {
+				var frame = document.createElement('iframe');
+				frame.hidden = true;
+				frame.src = 'download/' + id;
+				document.body.appendChild(frame);
+			});
+		});
+		needed();
+	}
+	//a long download can otherwise look idle to the browser, which may then stop the service worker
+	var keepAlive = setInterval(function() {
+		if (navigator.serviceWorker.controller) {
+			navigator.serviceWorker.controller.postMessage({type: 'keepalive'});
+		}
+	}, 10000);
+	function stop() {
+		clearInterval(keepAlive);
+	}
+	
+	var finished = startTask({type: 'folder', items: items, port: zip.port2}, function(percent) {
+		startDownload();
+		onProgress(percent);
+	}).then(function(result) {
+		if (result.streamed) {
+			startDownload();
+		}
+		return result;
+	});
+	if (now) {
+		startDownload();
+	}
+	//a folder of only junk finishes without needing a download at all
+	return Promise.race([finished, downloadNeeded]).then(function() {
+		return started || true;
+	}).then(function(ok) {
+		if (!ok) {
+			cancelTask();
+			//so a download the browser starts late (say, once the user allows it) fails rather than hangs
+			if (navigator.serviceWorker.controller) {
+				navigator.serviceWorker.controller.postMessage({type: 'forget', id: id});
+			}
+			return null;
+		}
+		return finished;
+	}).then(function(result) {
+		stop();
+		return result;
+	}, function(error) {
+		stop();
+		throw error;
 	});
 }
 
@@ -225,19 +346,19 @@ function readAllEntries(reader) {
 	});
 }
 
-//the message under "Select zip". blob and name add a "download again" link, busy stops screen readers reading every percent
-function showStatus(text, blob, name, busy) {
+//the message under "Select zip". again adds a "Download again" link that calls it, busy stops screen readers reading every percent
+function showStatus(text, again, busy) {
 	statusBox.textContent = text;
 	statusBox.setAttribute('aria-busy', busy ? 'true' : 'false');
-	if (blob) {
-		var again = document.createElement('a');
-		again.href = '#';
-		again.textContent = 'Download again';
-		again.addEventListener('click', function(e) {
+	if (again) {
+		var link = document.createElement('a');
+		link.href = '#';
+		link.textContent = 'Download again';
+		link.addEventListener('click', function(e) {
 			e.preventDefault();
-			download(blob, name);
+			again();
 		}, false);
-		statusBox.appendChild(again);
+		statusBox.appendChild(link);
 	}
 }
 
@@ -319,10 +440,20 @@ function startTask(task, onProgress) {
 	});
 }
 
+//stops the current job, if it's in the worker (a job running on the page just never finishes)
+function cancelTask() {
+	if (worker) {
+		worker.terminate();
+		worker = null;
+	}
+	current = null;
+}
+
 function startJob(job) {
 	var w = getWorker();
 	if (w) {
-		w.postMessage({id: job.id, task: job.task});
+		//a streamed folder's port has to be handed over to the worker rather than copied
+		w.postMessage({id: job.id, task: job.task}, job.task.port ? [job.task.port] : []);
 		return;
 	}
 	loadMainThread()
@@ -453,7 +584,7 @@ function handleDrop(dt) {
 		return;
 	}
 	if (entries[0] && entries[0].isDirectory) {
-		showStatus('Reading folder…', null, null, true);
+		showStatus('Reading folder…', null, true);
 		readFolder(entries[0]).then(function(items) {
 			handleFolder(entries[0].name, items);
 		}, function() {

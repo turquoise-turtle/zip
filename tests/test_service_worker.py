@@ -5,8 +5,6 @@ import pytest
 
 from conftest import OVERRIDES, ROOT, clean
 
-# Playwright only drives service workers in Chromium
-pytestmark = pytest.mark.only_browser('chromium')
 
 CACHE = re.search(r"var CACHE = PREFIX \+ '(v\d+)'", (ROOT / 'service-worker.js').read_text()).group(1)
 FILES = re.findall(r"^\s+'([^']*)',?$", (ROOT / 'service-worker.js').read_text().split('var FILES = [')[1].split('];')[0], re.M)

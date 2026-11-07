@@ -22,6 +22,8 @@ Cleaning never unpacks anything: every file that's kept is copied byte for byte,
 ## zipping folders
 Folders can be picked in desktop browsers (phones and tablets can't pick folders, so the option isn't shown there). Text-like files are compressed and files that are already compressed (photos, videos, zips and so on) are stored as they are. Browsers don't show whether a file is hidden on Windows or whether it's executable, so hidden files are only recognised by name, and every file is given ordinary read/write permissions.
 
+Where the browser allows it, once the site has been visited (tested with the engines behind Chrome, Edge, Firefox and Safari), the zip streams straight into the download as it's made, so even huge folders don't use much memory. Otherwise it's built in memory first: big files go in as references to themselves rather than copies, and files over 256 MB aren't compressed, to keep memory down.
+
 ## contributing
 Just make a pull request. The rules for what counts as hidden, and all the zip reading and writing, live in `clean.js`. There's no build step: the site is the files in this folder.
 

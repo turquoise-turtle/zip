@@ -124,20 +124,112 @@ def test_folder_with_70000_files(app, tmp_path):
         assert z.testzip() is None
 
 
-def test_folder_with_1500_large_files(app, tmp_path):
-    # Safari can only read about 2,000 files into one blob, so past 1,000 large files the rest are copied in
+def test_folder_with_2500_large_files(app, tmp_path):
+    # more files than Safari can read into one blob, so there the probe falls back to fewer references
     root = tmp_path / 'Photos'
     root.mkdir()
-    for i in range(1500):
+    for i in range(2500):
         with open(root / f'{i:04}.jpg', 'wb') as f:
             f.truncate(1_100_000)
-    with app.expect_download(timeout=1_500_000) as download:
-        app.set_input_files('#folderElem', str(root))
-    output = download.value.path()
+    with PeakMemory() as memory:
+        with app.expect_download(timeout=1_500_000) as download:
+            app.set_input_files('#folderElem', str(root))
+        output = download.value.path()
     try:
-        assert_zero_entries(output, [(f'Photos/{i:04}.jpg', 1_100_000) for i in range(1500)], any_order=True)
+        assert_zero_entries(output, [(f'Photos/{i:04}.jpg', 1_100_000) for i in range(2500)], any_order=True)
         import zipfile
         with zipfile.ZipFile(output) as z:
             assert z.testzip() is None
+        grew = (memory.peak - memory.start) / (1 << 20)
+        print(f'\n{app.context.browser.browser_type.name}: browser memory grew by {grew:.0f} MB at most')
     finally:
         output.unlink(missing_ok=True)
+
+
+# --- streamed through the service worker ---
+
+from test_streaming import sw_app, streamed  # noqa: E402,F401
+
+
+def stream_folder(page, root):
+    if not page.controlled:
+        pytest.skip('needs a service worker')
+    with PeakMemory() as memory:
+        started = time.monotonic()
+        with page.expect_download(timeout=1_500_000) as download:
+            page.set_input_files('#folderElem', str(root))
+        path = download.value.path()
+        seconds = time.monotonic() - started
+    grew = (memory.peak - memory.start) / (1 << 20)
+    print(f'\n{page.context.browser.browser_type.name}: {seconds:.1f}s, {path.stat().st_size / (1 << 20):.1f} MB, browser memory grew by {grew:.0f} MB at most')
+    assert streamed(path)
+    return path, grew
+
+
+def test_streamed_big_file_is_compressed(sw_app, tmp_path):
+    # with nothing held in memory, even huge files get compressed
+    root = tmp_path / 'Big'
+    root.mkdir()
+    with open(root / 'huge.bin', 'wb') as f:
+        f.truncate(int(4.5 * GiB))
+    path, grew = stream_folder(sw_app, root)
+    try:
+        import zipfile
+        with zipfile.ZipFile(path) as z:
+            info = z.getinfo('Big/huge.bin')
+            assert info.file_size == int(4.5 * GiB)
+            assert info.compress_type == zipfile.ZIP_DEFLATED
+            assert info.compress_size < 10 << 20
+            assert z.testzip() is None
+        assert grew < 1024
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_streamed_big_video(sw_app, tmp_path):
+    root = tmp_path / 'Video'
+    root.mkdir()
+    with open(root / 'video.mp4', 'wb') as f:
+        f.truncate(int(4.5 * GiB))
+    path, grew = stream_folder(sw_app, root)
+    try:
+        assert_zero_entries(path, [('Video/video.mp4', int(4.5 * GiB))])
+        import zipfile
+        with zipfile.ZipFile(path) as z:
+            assert z.testzip() is None
+        # Firefox's and WebKit's peaks are erratic here (from 167 MB to 2.6 GB between runs) but don't grow with
+        # the file: 9 GB videos peaked at 1.0 GB in Firefox and 167 MB in WebKit. So check the file was never all
+        # held in memory, rather than a fixed limit
+        assert grew < 0.75 * 4.5 * 1024
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_streamed_2500_large_files(sw_app, tmp_path):
+    root = tmp_path / 'Photos'
+    root.mkdir()
+    for i in range(2500):
+        with open(root / f'{i:04}.jpg', 'wb') as f:
+            f.truncate(1_100_000)
+    path, grew = stream_folder(sw_app, root)
+    try:
+        assert_zero_entries(path, [(f'Photos/{i:04}.jpg', 1_100_000) for i in range(2500)], any_order=True)
+        import zipfile
+        with zipfile.ZipFile(path) as z:
+            assert z.testzip() is None
+        assert grew < 1024
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_streamed_70000_small_files(sw_app, tmp_path):
+    # long enough that the service worker would look idle without the page's keep-alive messages
+    root = tmp_path / 'Many'
+    root.mkdir()
+    for i in range(70_000):
+        (root / f'{i:05}.txt').write_bytes(b'x')
+    path, _ = stream_folder(sw_app, root)
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        assert len(z.infolist()) == 70_000
+        assert z.testzip() is None

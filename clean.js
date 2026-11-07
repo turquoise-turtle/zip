@@ -102,22 +102,36 @@ function decodeFileName(bytes) {
 	}
 }
 
-var crcTable = [];
+//crc-32 "slicing by 8": eight lookup tables let it take 8 bytes per step instead of 1, which makes it about
+//four times faster. that matters when zipping a big folder, because every byte has to go through it.
+//table k (at k * 256) holds the crc of a byte followed by k zero bytes
+var crcTables = new Uint32Array(8 * 256);
 for (var n = 0; n < 256; n++) {
 	var c = n;
 	for (var k = 0; k < 8; k++) {
 		c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
 	}
-	crcTable[n] = c >>> 0;
+	crcTables[n] = c;
+}
+for (var t = 256; t < 8 * 256; t++) {
+	crcTables[t] = (crcTables[t - 256] >>> 8) ^ crcTables[crcTables[t - 256] & 0xFF];
 }
 
 //pass the previous result back in to carry on across chunks
 function crc32(bytes, crc) {
-	crc = (crc === undefined ? 0 : crc) ^ 0xFFFFFFFF;
-	for (var i = 0; i < bytes.length; i++) {
-		crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+	var T = crcTables;
+	crc = ~(crc === undefined ? 0 : crc);
+	var i = 0;
+	var end8 = bytes.length - (bytes.length % 8);
+	for (; i < end8; i += 8) {
+		var lo = crc ^ (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24));
+		crc = T[1792 + (lo & 0xFF)] ^ T[1536 + ((lo >>> 8) & 0xFF)] ^ T[1280 + ((lo >>> 16) & 0xFF)] ^ T[1024 + (lo >>> 24)] ^
+			T[768 + bytes[i + 4]] ^ T[512 + bytes[i + 5]] ^ T[256 + bytes[i + 6]] ^ T[bytes[i + 7]];
 	}
-	return (crc ^ 0xFFFFFFFF) >>> 0;
+	for (; i < bytes.length; i++) {
+		crc = T[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+	}
+	return ~crc >>> 0;
 }
 
 //zip numbers are little-endian. 64-bit ones are fine as plain numbers up to 8 PB
@@ -464,10 +478,38 @@ var alreadyCompressed = /\.(zip|7z|rar|gz|tgz|bz2|xz|zst|jpe?g|png|gif|webp|heic
 var compressLimit = 256 * 1024 * 1024;
 var chunkSize = 8 * 1024 * 1024;
 //big files go in the zip as references to the original file, so they're never copied into memory. but
-//Safari can only read about 2,000 files into one blob, so at most the 1,000 largest go in that way, and
-//every other file goes in as the bytes read for its checksum
+//some browsers can only read so many files into one blob (Safari manages about 2,000), and a download
+//that goes past that just fails. so a quick probe first reads 1 byte from each of them as one blob, which
+//fails at the same point the real thing would. files that don't fit go in as the bytes read for their
+//checksum instead
 var referenceOver = 1024 * 1024;
-var maxReferences = 1000;
+
+function canRead(files) {
+	return new Blob(files.map(function(file) {
+		return file.slice(0, 1);
+	})).arrayBuffer().then(function() {
+		return true;
+	}, function() {
+		return false;
+	});
+}
+
+//resolves with how many of the files can go in as references: all of them if the probe passes, otherwise
+//the first of 1,000, 500, 250 and so on that does
+function referenceLimit(files) {
+	function attempt(count) {
+		if (count === 0) {
+			return Promise.resolve(0);
+		}
+		return canRead(files.slice(0, count)).then(function(ok) {
+			if (ok) {
+				return count;
+			}
+			return attempt(count > 1000 ? 1000 : Math.floor(count / 2));
+		});
+	}
+	return attempt(files.length);
+}
 
 //collects the pieces of a zip. a blob made of tens of thousands of pieces is very slow to build and
 //download, so runs of small pieces are joined into blocks of about 4 MB
@@ -600,10 +642,287 @@ function dosDateTime(time) {
 
 var utf8Encoder = new TextEncoder();
 
+//where a folder zip goes. BlobOutput builds it up as a blob (big files as references to themselves).
+//StreamOutput sends it through a MessagePort to the service worker, which hands it to the browser as a
+//download while it's still being made, so nothing piles up in memory however big the folder is
+function BlobOutput() {
+	this.pieces = new Pieces();
+}
+
+BlobOutput.prototype.write = function(piece) {
+	this.pieces.add(piece);
+	return Promise.resolve();
+};
+
+BlobOutput.prototype.finish = function() {
+	return Promise.resolve(this.pieces.blob());
+};
+
+//the service worker asks for each piece ('pull') when the download is ready for more, so a slow disk or
+//network can't make pieces pile up. small pieces are gathered into messages of about 1 MB
+function StreamOutput(port) {
+	var output = this;
+	this.port = port;
+	this.size = 0;
+	this.credits = 0;
+	this.cancelled = false;
+	this.waiting = null;
+	this.pending = new Pieces();
+	port.onmessage = function(e) {
+		var waiting = output.waiting;
+		output.waiting = null;
+		if (e.data === 'pull') {
+			output.credits++;
+			if (waiting) {
+				waiting.resume();
+			}
+		} else if (e.data === 'cancelled') {
+			//cancelled in the browser's downloads, so stop making it
+			output.cancelled = true;
+			if (waiting) {
+				waiting.stop(new Error('The download was cancelled.'));
+			}
+		}
+	};
+}
+
+StreamOutput.prototype.write = function(piece) {
+	this.pending.add(piece);
+	if (this.pending.pendingSize < 1024 * 1024) {
+		return Promise.resolve();
+	}
+	return this.send();
+};
+
+StreamOutput.prototype.send = function() {
+	var output = this;
+	this.pending.flush();
+	var blocks = this.pending.parts;
+	this.pending.parts = [];
+	return blocks.reduce(function(previous, block) {
+		return previous.then(function() {
+			return output.credit();
+		}).then(function() {
+			output.credits--;
+			output.size += block.length;
+			output.port.postMessage(block, [block.buffer]);
+		});
+	}, Promise.resolve());
+};
+
+StreamOutput.prototype.credit = function() {
+	var output = this;
+	if (this.cancelled) {
+		return Promise.reject(new Error('The download was cancelled.'));
+	}
+	if (this.credits > 0) {
+		return Promise.resolve();
+	}
+	return new Promise(function(resolve, reject) {
+		output.waiting = {resume: resolve, stop: reject};
+	});
+};
+
+StreamOutput.prototype.finish = function() {
+	var output = this;
+	return this.send().then(function() {
+		output.port.postMessage('end');
+		return null;
+	});
+};
+
+StreamOutput.prototype.fail = function(message) {
+	//makes the browser mark the download as failed, rather than leaving a broken zip
+	this.port.postMessage({error: message});
+};
+
+//reads a file once, sending its data straight on (compressed or not) while working out its checksum,
+//for zips that are streamed and so can't go back to fill in the header
+function streamFile(file, compress, output, onBytes) {
+	var crc = 0;
+	var dataSize = 0;
+	if (!compress) {
+		return eachChunk(file, function(bytes) {
+			crc = crc32(bytes, crc);
+			onBytes(bytes.length);
+			dataSize += bytes.length;
+			return output.write(bytes);
+		}).then(function() {
+			return {crc: crc, size: file.size, method: 0, dataSize: dataSize};
+		});
+	}
+	var stream = new CompressionStream('deflate-raw');
+	var writer = stream.writable.getWriter();
+	var reader = stream.readable.getReader();
+	var sent = (function send() {
+		return reader.read().then(function(result) {
+			if (result.done) {
+				return;
+			}
+			dataSize += result.value.length;
+			return output.write(result.value).then(send);
+		});
+	})();
+	return eachChunk(file, function(bytes) {
+		crc = crc32(bytes, crc);
+		onBytes(bytes.length);
+		return writer.write(bytes);
+	}).then(function() {
+		return writer.close();
+	}).then(function() {
+		return sent;
+	}).then(function() {
+		return {crc: crc, size: file.size, method: 8, dataSize: dataSize};
+	});
+}
+
+//extended timestamp, so unzipping gets the exact time in any time zone
+function timestampField(time) {
+	var timestamp = new Uint8Array(9);
+	set16(timestamp, 0, 0x5455);
+	set16(timestamp, 2, 5);
+	timestamp[4] = 1;
+	set32(timestamp, 5, Math.max(0, Math.min(Math.floor(time / 1000), 0xFFFFFFFF)));
+	return timestamp;
+}
+
+//a streamed entry's sizes aren't known until after its data, so they go in a data descriptor that follows
+//it (bit 3 of the flags). zip64 has to be decided up front, so files close to 4 GB get it to be safe
+function localHeader(c) {
+	var extra = c.timestamp;
+	if (c.zip64) {
+		extra = new Uint8Array(c.timestamp.length + 20);
+		extra.set(c.timestamp);
+		set16(extra, c.timestamp.length, 0x0001);
+		set16(extra, c.timestamp.length + 2, 16);
+		set64(extra, c.timestamp.length + 4, c.streamed ? 0 : c.size);
+		set64(extra, c.timestamp.length + 12, c.streamed ? 0 : c.dataSize);
+	}
+	var local = new Uint8Array(30 + c.name.length + extra.length);
+	set32(local, 0, 0x04034B50);
+	set16(local, 4, c.zip64 ? 45 : 20);
+	//names are utf-8
+	set16(local, 6, c.streamed ? 0x808 : 0x800);
+	set16(local, 8, c.method);
+	set16(local, 10, c.when.time);
+	set16(local, 12, c.when.date);
+	if (!c.streamed) {
+		set32(local, 14, c.crc);
+		set32(local, 18, c.zip64 ? 0xFFFFFFFF : c.dataSize);
+		set32(local, 22, c.zip64 ? 0xFFFFFFFF : c.size);
+	} else if (c.zip64) {
+		set32(local, 18, 0xFFFFFFFF);
+		set32(local, 22, 0xFFFFFFFF);
+	}
+	set16(local, 26, c.name.length);
+	set16(local, 28, extra.length);
+	local.set(c.name, 30);
+	local.set(extra, 30 + c.name.length);
+	return local;
+}
+
+function dataDescriptor(c) {
+	var descriptor = new Uint8Array(c.zip64 ? 24 : 16);
+	set32(descriptor, 0, 0x08074B50);
+	set32(descriptor, 4, c.crc);
+	if (c.zip64) {
+		set64(descriptor, 8, c.dataSize);
+		set64(descriptor, 16, c.size);
+	} else {
+		set32(descriptor, 8, c.dataSize);
+		set32(descriptor, 12, c.size);
+	}
+	return descriptor;
+}
+
+//the central directory and end records, for entries described by localHeader's c
+function zipEnd(central, cdStart) {
+	var records = central.map(function(c) {
+		//zip64 fields are only there for the numbers too big to fit
+		var zip64 = [];
+		if (c.size >= 0xFFFFFFFF) {
+			zip64.push(c.size);
+		}
+		if (c.dataSize >= 0xFFFFFFFF) {
+			zip64.push(c.dataSize);
+		}
+		if (c.offset >= 0xFFFFFFFF) {
+			zip64.push(c.offset);
+		}
+		var extra = new Uint8Array(c.timestamp.length + (zip64.length ? 4 + zip64.length * 8 : 0));
+		extra.set(c.timestamp);
+		if (zip64.length) {
+			set16(extra, c.timestamp.length, 0x0001);
+			set16(extra, c.timestamp.length + 2, zip64.length * 8);
+			zip64.forEach(function(value, i) {
+				set64(extra, c.timestamp.length + 4 + i * 8, value);
+			});
+		}
+		var version = zip64.length || c.zip64 ? 45 : 20;
+		var record = new Uint8Array(46 + c.name.length + extra.length);
+		set32(record, 0, 0x02014B50);
+		//made on unix, so the permissions below are read
+		set16(record, 4, (3 << 8) | version);
+		set16(record, 6, version);
+		set16(record, 8, c.streamed ? 0x808 : 0x800);
+		set16(record, 10, c.method);
+		set16(record, 12, c.when.time);
+		set16(record, 14, c.when.date);
+		set32(record, 16, c.crc);
+		set32(record, 20, c.dataSize >= 0xFFFFFFFF ? 0xFFFFFFFF : c.dataSize);
+		set32(record, 24, c.size >= 0xFFFFFFFF ? 0xFFFFFFFF : c.size);
+		set16(record, 28, c.name.length);
+		set16(record, 30, extra.length);
+		//rw-r--r-- for files and rwxr-xr-x for folders, since browsers can't see the real permissions
+		set32(record, 38, c.isFile ? 0x81A40000 : 0x41ED0010);
+		set32(record, 42, c.offset >= 0xFFFFFFFF ? 0xFFFFFFFF : c.offset);
+		record.set(c.name, 46);
+		record.set(extra, 46 + c.name.length);
+		return record;
+	});
+	var cdSize = records.reduce(function(sum, record) {
+		return sum + record.length;
+	}, 0);
+	var cd = new Uint8Array(cdSize);
+	var at = 0;
+	records.forEach(function(record) {
+		cd.set(record, at);
+		at += record.length;
+	});
+	var parts = [cd];
+	
+	var count = records.length;
+	if (count >= 0xFFFF || cdSize >= 0xFFFFFFFF || cdStart >= 0xFFFFFFFF) {
+		var zip64End = new Uint8Array(56);
+		set32(zip64End, 0, 0x06064B50);
+		set64(zip64End, 4, 44);
+		set16(zip64End, 12, (3 << 8) | 45);
+		set16(zip64End, 14, 45);
+		set64(zip64End, 24, count);
+		set64(zip64End, 32, count);
+		set64(zip64End, 40, cdSize);
+		set64(zip64End, 48, cdStart);
+		var locator = new Uint8Array(20);
+		set32(locator, 0, 0x07064B50);
+		set64(locator, 8, cdStart + cdSize);
+		set32(locator, 16, 1);
+		parts.push(zip64End, locator);
+	}
+	var end = new Uint8Array(22);
+	set32(end, 0, 0x06054B50);
+	set16(end, 8, Math.min(count, 0xFFFF));
+	set16(end, 10, Math.min(count, 0xFFFF));
+	set32(end, 12, Math.min(cdSize, 0xFFFFFFFF));
+	set32(end, 16, Math.min(cdStart, 0xFFFFFFFF));
+	parts.push(end);
+	return parts;
+}
+
 //builds a zip from a folder's files, leaving out the hidden junk. items are {path, file}, with file null
-//for an empty folder. resolves with {entries: [{name, reason}], blob}, where blob is null if everything
-//was junk
-function zipFolder(items, onProgress) {
+//for an empty folder. with a port the zip is streamed to the service worker (see StreamOutput), otherwise
+//it's built as a blob. resolves with {entries: [{name, reason}], blob}, where blob is null if everything
+//was junk or the zip was streamed
+function zipFolder(items, onProgress, port) {
 	var reasons = findHidden(items.map(function(item) {
 		return {name: item.path, dir: !item.file, hidden: false};
 	}));
@@ -616,15 +935,14 @@ function zipFolder(items, onProgress) {
 	if (!kept.some(function(item) {
 		return item.file;
 	})) {
+		if (port) {
+			port.postMessage({error: 'Nothing to zip'});
+		}
 		return Promise.resolve({entries: list, blob: null});
 	}
 	
+	var output = port ? new StreamOutput(port) : new BlobOutput();
 	var compress = canCompress();
-	var references = new Set(kept.filter(function(item) {
-		return item.file && item.file.size > referenceOver;
-	}).sort(function(a, b) {
-		return b.file.size - a.file.size;
-	}).slice(0, maxReferences));
 	var total = kept.reduce(function(sum, item) {
 		return sum + (item.file ? item.file.size : 0);
 	}, 0);
@@ -639,154 +957,100 @@ function zipFolder(items, onProgress) {
 		}
 	}
 	
-	var pieces = new Pieces();
+	//the biggest files are the ones most worth not copying. references are only used for blobs, since a
+	//stream reads each file as it goes
+	var references = new Set();
+	var chain = Promise.resolve();
+	if (!port) {
+		var candidates = kept.filter(function(item) {
+			return item.file && item.file.size > referenceOver;
+		}).sort(function(a, b) {
+			return b.file.size - a.file.size;
+		});
+		chain = referenceLimit(candidates.map(function(item) {
+			return item.file;
+		})).then(function(limit) {
+			references = new Set(candidates.slice(0, limit));
+		});
+	}
+	
 	var central = [];
 	var position = 0;
-	var chain = Promise.resolve();
 	kept.forEach(function(item) {
 		chain = chain.then(function() {
-			if (!item.file) {
-				return {crc: 0, size: 0, method: 0, data: [], dataSize: 0};
+			var file = item.file;
+			var time = file ? file.lastModified : Date.now();
+			var c = {
+				name: utf8Encoder.encode(item.path),
+				when: dosDateTime(time),
+				timestamp: timestampField(time),
+				offset: position,
+				isFile: !!file,
+				streamed: !!port && !!file && file.size > 0,
+				crc: 0,
+				size: 0,
+				dataSize: 0,
+				method: 0
+			};
+			//compressing means holding the compressed copy in a blob, so very big files are only compressed
+			//when streaming
+			var shrink = compress && !!file && file.size > 0 && !alreadyCompressed.test(item.path) && (!!port || file.size <= compressLimit);
+			central.push(c);
+			
+			if (c.streamed) {
+				c.method = shrink ? 8 : 0;
+				c.zip64 = file.size >= 0xFFFF0000;
+				var local = localHeader(c);
+				return output.write(local).then(function() {
+					return streamFile(file, shrink, output, onBytes);
+				}).then(function(entry) {
+					c.crc = entry.crc;
+					c.size = entry.size;
+					c.dataSize = entry.dataSize;
+					var descriptor = dataDescriptor(c);
+					position += local.length + entry.dataSize + descriptor.length;
+					return output.write(descriptor);
+				});
 			}
-			var shrink = compress && item.file.size > 0 && item.file.size <= compressLimit && !alreadyCompressed.test(item.path);
-			return prepareFile(item.file, shrink, references.has(item), onBytes);
-		}).then(function(entry) {
-			var name = utf8Encoder.encode(item.path);
-			var when = dosDateTime(item.file ? item.file.lastModified : Date.now());
-			var seconds = Math.floor((item.file ? item.file.lastModified : Date.now()) / 1000);
-			var big = entry.size >= 0xFFFFFFFF || entry.dataSize >= 0xFFFFFFFF;
-			var version = big ? 45 : 20;
 			
-			//extended timestamp, so unzipping gets the exact time in any time zone
-			var timestamp = new Uint8Array(9);
-			set16(timestamp, 0, 0x5455);
-			set16(timestamp, 2, 5);
-			timestamp[4] = 1;
-			set32(timestamp, 5, Math.max(0, Math.min(seconds, 0xFFFFFFFF)));
-			var localExtra = timestamp;
-			if (big) {
-				localExtra = new Uint8Array(9 + 20);
-				localExtra.set(timestamp);
-				set16(localExtra, 9, 0x0001);
-				set16(localExtra, 11, 16);
-				set64(localExtra, 13, entry.size);
-				set64(localExtra, 21, entry.dataSize);
-			}
-			
-			var local = new Uint8Array(30 + name.length + localExtra.length);
-			set32(local, 0, 0x04034B50);
-			set16(local, 4, version);
-			//names are utf-8
-			set16(local, 6, 0x800);
-			set16(local, 8, entry.method);
-			set16(local, 10, when.time);
-			set16(local, 12, when.date);
-			set32(local, 14, entry.crc);
-			set32(local, 18, big ? 0xFFFFFFFF : entry.dataSize);
-			set32(local, 22, big ? 0xFFFFFFFF : entry.size);
-			set16(local, 26, name.length);
-			set16(local, 28, localExtra.length);
-			local.set(name, 30);
-			local.set(localExtra, 30 + name.length);
-			
-			central.push({item: item, entry: entry, name: name, when: when, timestamp: timestamp, offset: position, version: version});
-			pieces.add(local);
-			entry.data.forEach(function(piece) {
-				pieces.add(piece);
+			var prepared = file ? prepareFile(file, shrink, references.has(item), onBytes) : Promise.resolve({crc: 0, size: 0, method: 0, data: [], dataSize: 0});
+			return prepared.then(function(entry) {
+				c.crc = entry.crc;
+				c.size = entry.size;
+				c.dataSize = entry.dataSize;
+				c.method = entry.method;
+				c.zip64 = entry.size >= 0xFFFFFFFF || entry.dataSize >= 0xFFFFFFFF;
+				var local = localHeader(c);
+				position += local.length + entry.dataSize;
+				return entry.data.reduce(function(previous, piece) {
+					return previous.then(function() {
+						return output.write(piece);
+					});
+				}, output.write(local));
 			});
-			position += local.length + entry.dataSize;
 		});
 	});
 	
 	return chain.then(function() {
-		var records = central.map(function(c) {
-			//zip64 fields are only there for the numbers too big to fit
-			var zip64 = [];
-			if (c.entry.size >= 0xFFFFFFFF) {
-				zip64.push(c.entry.size);
-			}
-			if (c.entry.dataSize >= 0xFFFFFFFF) {
-				zip64.push(c.entry.dataSize);
-			}
-			if (c.offset >= 0xFFFFFFFF) {
-				zip64.push(c.offset);
-			}
-			var extra = new Uint8Array(c.timestamp.length + (zip64.length ? 4 + zip64.length * 8 : 0));
-			extra.set(c.timestamp);
-			if (zip64.length) {
-				set16(extra, c.timestamp.length, 0x0001);
-				set16(extra, c.timestamp.length + 2, zip64.length * 8);
-				zip64.forEach(function(value, i) {
-					set64(extra, c.timestamp.length + 4 + i * 8, value);
-				});
-			}
-			var version = zip64.length ? 45 : c.version;
-			var record = new Uint8Array(46 + c.name.length + extra.length);
-			set32(record, 0, 0x02014B50);
-			//made on unix, so the permissions below are read
-			set16(record, 4, (3 << 8) | version);
-			set16(record, 6, version);
-			set16(record, 8, 0x800);
-			set16(record, 10, c.entry.method);
-			set16(record, 12, c.when.time);
-			set16(record, 14, c.when.date);
-			set32(record, 16, c.entry.crc);
-			set32(record, 20, c.entry.dataSize >= 0xFFFFFFFF ? 0xFFFFFFFF : c.entry.dataSize);
-			set32(record, 24, c.entry.size >= 0xFFFFFFFF ? 0xFFFFFFFF : c.entry.size);
-			set16(record, 28, c.name.length);
-			set16(record, 30, extra.length);
-			//rw-r--r-- for files and rwxr-xr-x for folders, since browsers can't see the real permissions
-			set32(record, 38, c.item.file ? 0x81A40000 : 0x41ED0010);
-			set32(record, 42, c.offset >= 0xFFFFFFFF ? 0xFFFFFFFF : c.offset);
-			record.set(c.name, 46);
-			record.set(extra, 46 + c.name.length);
-			return record;
-		});
-		var cdStart = position;
-		var cdSize = records.reduce(function(sum, record) {
-			return sum + record.length;
-		}, 0);
-		var cd = new Uint8Array(cdSize);
-		var at = 0;
-		records.forEach(function(record) {
-			cd.set(record, at);
-			at += record.length;
-		});
-		pieces.add(cd);
-		position += cdSize;
-		
-		var count = records.length;
-		if (count >= 0xFFFF || cdSize >= 0xFFFFFFFF || cdStart >= 0xFFFFFFFF) {
-			var zip64End = new Uint8Array(56);
-			set32(zip64End, 0, 0x06064B50);
-			set64(zip64End, 4, 44);
-			set16(zip64End, 12, (3 << 8) | 45);
-			set16(zip64End, 14, 45);
-			set64(zip64End, 24, count);
-			set64(zip64End, 32, count);
-			set64(zip64End, 40, cdSize);
-			set64(zip64End, 48, cdStart);
-			var locator = new Uint8Array(20);
-			set32(locator, 0, 0x07064B50);
-			set64(locator, 8, position);
-			set32(locator, 16, 1);
-			pieces.add(zip64End);
-			pieces.add(locator);
+		return zipEnd(central, position).reduce(function(previous, piece) {
+			return previous.then(function() {
+				return output.write(piece);
+			});
+		}, Promise.resolve());
+	}).then(function() {
+		return output.finish();
+	}).then(function(blob) {
+		return {entries: list, blob: blob, streamed: !!port, size: blob ? blob.size : output.size};
+	}, function(error) {
+		if (port) {
+			output.fail(error.message);
 		}
-		var end = new Uint8Array(22);
-		set32(end, 0, 0x06054B50);
-		set16(end, 8, Math.min(count, 0xFFFF));
-		set16(end, 10, Math.min(count, 0xFFFF));
-		set32(end, 12, Math.min(cdSize, 0xFFFFFFFF));
-		set32(end, 16, Math.min(cdStart, 0xFFFFFFFF));
-		pieces.add(end);
-		
-		return {entries: list, blob: pieces.blob()};
+		throw error;
 	});
 }
 
 function runTask(task, onProgress) {
-	return task.type === 'folder' ? zipFolder(task.items, onProgress) : cleanZip(task.file);
+	return task.type === 'folder' ? zipFolder(task.items, onProgress, task.port) : cleanZip(task.file);
 }
 
 //when running as a worker, take jobs from alt.js
@@ -797,7 +1061,7 @@ if (typeof importScripts === 'function') {
 			self.postMessage({id: id, type: 'progress', percent: percent});
 		})
 		.then(function(result) {
-			self.postMessage({id: id, type: 'done', entries: result.entries, blob: result.blob});
+			self.postMessage({id: id, type: 'done', entries: result.entries, blob: result.blob, streamed: result.streamed, size: result.size});
 		}, function(error) {
 			self.postMessage({id: id, type: 'error', message: error.message});
 		});
