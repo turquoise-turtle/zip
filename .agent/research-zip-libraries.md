@@ -62,4 +62,5 @@ The file-reference limit, measured with a folder of 3,000 files at 1.1 MB each:
 
 - **The probe predicts the limit exactly,** so it can decide per browser how many files go in by reference.
 - **Service-worker streaming got past WebKit's limit,** and would also remove the 256 MB compression cutoff, since nothing is held in memory.
+- **Correction (2026-11-08):** the app's own streaming works in Playwright's Firefox too. The failure in this experiment came from the experiment page, not from Firefox.
 - **Unverified:** real Safari and real Firefox weren't tested; Playwright's WebKit and Firefox builds stand in for them.
