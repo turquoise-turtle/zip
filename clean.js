@@ -477,11 +477,16 @@ var alreadyCompressed = /\.(zip|7z|rar|gz|tgz|bz2|xz|zst|jpe?g|png|gif|webp|heic
 //bigger files are stored as they are, so the zip never has to hold a huge compressed copy in memory
 var compressLimit = 256 * 1024 * 1024;
 var chunkSize = 8 * 1024 * 1024;
+var minCompress = 128;
+//Chrome and Safari look a picked file up on disk the first time its size is asked for, about 0.1 ms each and
+//blocking the page meanwhile: 13 seconds for 130,000 files. so with lots of files, sizes are only looked up
+//as each one is zipped, and progress counts files instead of bytes
+var sizesUpFrontUnder = 2000;
+
 //big files go in the zip as references to the original file, so they're never copied into memory. but
 //some browsers can only read so many files into one blob (Safari manages about 2,000), and a download
-//that goes past that just fails. so a quick probe first reads 1 byte from each of them as one blob, which
-//fails at the same point the real thing would. files that don't fit go in as the bytes read for their
-//checksum instead
+//that goes past that just fails. so once a zip is otherwise done, a quick probe reads 1 byte from each of
+//them as one blob, which fails at the same point the real thing would, and any that don't fit are copied in
 var referenceOver = 1024 * 1024;
 
 function canRead(files) {
@@ -512,8 +517,11 @@ function referenceLimit(files) {
 }
 
 //collects the pieces of a zip. a blob made of tens of thousands of pieces is very slow to build and
-//download, so runs of small pieces are joined into blocks of about 4 MB
-function Pieces() {
+//download, so runs of small pieces are joined into blocks of about 4 MB. asBlobs turns each block into a
+//blob straight away, which hands it to the browser to keep outside the page's memory (Safari's page
+//crashes holding a couple of gigabytes)
+function Pieces(asBlobs) {
+	this.asBlobs = asBlobs;
 	this.parts = [];
 	this.pending = [];
 	this.pendingSize = 0;
@@ -542,7 +550,7 @@ Pieces.prototype.flush = function() {
 		block.set(piece, at);
 		at += piece.length;
 	});
-	this.parts.push(block);
+	this.parts.push(this.asBlobs ? new Blob([block]) : block);
 	this.pending = [];
 	this.pendingSize = 0;
 };
@@ -563,8 +571,72 @@ function canCompress() {
 	}
 }
 
+//reading files one at a time is slow when there are lots of small ones, because every read is a round trip
+//to the browser (about 0.3 ms). so runs of small files are read 512 at a time as one blob and split up again,
+//and the next run is read while this one is zipped. eachChunk uses the bytes from here when they're ready
+var batchFiles = 512;
+var batchFileSize = 1024 * 1024;
+var preloaded = new Map();
+//file -> the read its batch is waiting on
+var reading = new Map();
+
+function readBatch(items, start) {
+	var batch = [];
+	var size = 0;
+	var i = start;
+	for (; i < items.length && batch.length < batchFiles; i++) {
+		var file = items[i].file;
+		if (!file || preloaded.has(file) || reading.has(file)) {
+			continue;
+		}
+		if (file.size > batchFileSize || size + file.size > chunkSize) {
+			break;
+		}
+		batch.push(file);
+		size += file.size;
+	}
+	if (batch.length < 2) {
+		return null;
+	}
+	var done = read(new Blob(batch), 0, size).then(function(bytes) {
+		var at = 0;
+		batch.forEach(function(file) {
+			preloaded.set(file, bytes.subarray(at, at + file.size));
+			reading.delete(file);
+			at += file.size;
+		});
+	}, function(error) {
+		batch.forEach(function(file) {
+			reading.delete(file);
+		});
+		throw error;
+	});
+	batch.forEach(function(file) {
+		reading.set(file, done);
+	});
+	return {done: done, next: i};
+}
+
+function preload(items, start) {
+	var waiting = reading.get(items[start].file);
+	if (waiting) {
+		return waiting;
+	}
+	var batch = readBatch(items, start);
+	if (!batch) {
+		return Promise.resolve();
+	}
+	readBatch(items, batch.next);
+	return batch.done;
+}
+
 //reads a file in chunks, so even huge files never have to fit in memory
 function eachChunk(file, onChunk) {
+	var bytes = preloaded.get(file);
+	if (bytes) {
+		preloaded.delete(file);
+		return Promise.resolve(onChunk(bytes));
+	}
 	var at = 0;
 	function next() {
 		if (at >= file.size) {
@@ -646,16 +718,38 @@ var utf8Encoder = new TextEncoder();
 //StreamOutput sends it through a MessagePort to the service worker, which hands it to the browser as a
 //download while it's still being made, so nothing piles up in memory however big the folder is
 function BlobOutput() {
-	this.pieces = new Pieces();
+	this.pieces = new Pieces(true);
+	this.references = [];
 }
 
 BlobOutput.prototype.write = function(piece) {
 	this.pieces.add(piece);
+	if (piece instanceof Blob) {
+		this.references.push({file: piece, at: this.pieces.parts.length - 1});
+	}
 	return Promise.resolve();
 };
 
+//only now is it known how many files went in by reference, so check the browser can read that many (see
+//referenceLimit), and copy in the smallest of them if it can't
 BlobOutput.prototype.finish = function() {
-	return Promise.resolve(this.pieces.blob());
+	var output = this;
+	var references = this.references.sort(function(a, b) {
+		return b.file.size - a.file.size;
+	});
+	return referenceLimit(references.map(function(reference) {
+		return reference.file;
+	})).then(function(limit) {
+		return references.slice(limit).reduce(function(previous, reference) {
+			return previous.then(function() {
+				return read(reference.file, 0, reference.file.size);
+			}).then(function(bytes) {
+				output.pieces.parts[reference.at] = new Blob([bytes]);
+			});
+		}, Promise.resolve());
+	}).then(function() {
+		return output.pieces.blob();
+	});
 };
 
 //the service worker asks for each piece ('pull') when the download is ready for more, so a slow disk or
@@ -943,42 +1037,51 @@ function zipFolder(items, onProgress, port) {
 	
 	var output = port ? new StreamOutput(port) : new BlobOutput();
 	var compress = canCompress();
-	var total = kept.reduce(function(sum, item) {
-		return sum + (item.file ? item.file.size : 0);
-	}, 0);
-	var done = 0;
+	var files = kept.filter(function(item) {
+		return item.file;
+	});
+	
+	//progress is by bytes, or by files when there are lots of them (see sizesUpFrontUnder), counting how far
+	//through the current file it is so big files don't sit at one number
+	var sizesUpFront = files.length <= sizesUpFrontUnder;
+	var totalBytes = sizesUpFront ? files.reduce(function(sum, item) {
+		return sum + item.file.size;
+	}, 0) : 0;
+	var bytesDone = 0;
+	var filesDone = 0;
+	var currentDone = 0;
+	var currentSize = 0;
 	var lastPercent = -1;
-	function onBytes(count) {
-		done += count;
-		var percent = total ? Math.floor(done / total * 100) : 100;
+	function report() {
+		var fraction;
+		if (sizesUpFront) {
+			fraction = totalBytes ? (bytesDone + currentDone) / totalBytes : 1;
+		} else {
+			fraction = (filesDone + (currentSize ? currentDone / currentSize : 0)) / files.length;
+		}
+		var percent = Math.min(100, Math.floor(fraction * 100));
 		if (percent !== lastPercent) {
 			lastPercent = percent;
 			onProgress(percent);
 		}
 	}
-	
-	//the biggest files are the ones most worth not copying. references are only used for blobs, since a
-	//stream reads each file as it goes
-	var references = new Set();
-	var chain = Promise.resolve();
-	if (!port) {
-		var candidates = kept.filter(function(item) {
-			return item.file && item.file.size > referenceOver;
-		}).sort(function(a, b) {
-			return b.file.size - a.file.size;
-		});
-		chain = referenceLimit(candidates.map(function(item) {
-			return item.file;
-		})).then(function(limit) {
-			references = new Set(candidates.slice(0, limit));
-		});
+	function onBytes(count) {
+		currentDone += count;
+		report();
 	}
+	var chain = Promise.resolve().then(report);
 	
 	var central = [];
 	var position = 0;
-	kept.forEach(function(item) {
+	kept.forEach(function(item, index) {
 		chain = chain.then(function() {
+			if (item.file && !preloaded.has(item.file) && (reading.has(item.file) || item.file.size <= batchFileSize)) {
+				return preload(kept, index);
+			}
+		}).then(function() {
 			var file = item.file;
+			currentDone = 0;
+			currentSize = file ? file.size : 0;
 			var time = file ? file.lastModified : Date.now();
 			var c = {
 				name: utf8Encoder.encode(item.path),
@@ -993,8 +1096,8 @@ function zipFolder(items, onProgress, port) {
 				method: 0
 			};
 			//compressing means holding the compressed copy in a blob, so very big files are only compressed
-			//when streaming
-			var shrink = compress && !!file && file.size > 0 && !alreadyCompressed.test(item.path) && (!!port || file.size <= compressLimit);
+			//when streaming. tiny files can't get any smaller, so they aren't tried
+			var shrink = compress && !!file && file.size >= minCompress && !alreadyCompressed.test(item.path) && (!!port || file.size <= compressLimit);
 			central.push(c);
 			
 			if (c.streamed) {
@@ -1013,7 +1116,8 @@ function zipFolder(items, onProgress, port) {
 				});
 			}
 			
-			var prepared = file ? prepareFile(file, shrink, references.has(item), onBytes) : Promise.resolve({crc: 0, size: 0, method: 0, data: [], dataSize: 0});
+			//big files go in by reference, unless the browser turns out not to manage that many (see BlobOutput)
+			var prepared = file ? prepareFile(file, shrink, file.size > referenceOver, onBytes) : Promise.resolve({crc: 0, size: 0, method: 0, data: [], dataSize: 0});
 			return prepared.then(function(entry) {
 				c.crc = entry.crc;
 				c.size = entry.size;
@@ -1028,7 +1132,37 @@ function zipFolder(items, onProgress, port) {
 					});
 				}, output.write(local));
 			});
+		}).then(function() {
+			if (item.file) {
+				filesDone++;
+				bytesDone += currentSize;
+				currentDone = 0;
+				currentSize = 0;
+				report();
+			}
 		});
+	});
+	
+	//drops bytes read ahead but not used, e.g. when the zip fails part way, including reads still going
+	function forget() {
+		kept.forEach(function(item) {
+			if (item.file) {
+				preloaded.delete(item.file);
+				var waiting = reading.get(item.file);
+				if (waiting) {
+					waiting.then(function() {
+						preloaded.delete(item.file);
+					}, function() {});
+				}
+			}
+		});
+	}
+	chain = chain.then(function(value) {
+		forget();
+		return value;
+	}, function(error) {
+		forget();
+		throw error;
 	});
 	
 	return chain.then(function() {

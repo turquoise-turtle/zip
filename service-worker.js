@@ -2,7 +2,7 @@
 // the same cache storage, so this worker only ever touches caches with its own prefix.
 // Bump the version whenever any of the files below change, so everyone gets the new copy.
 var PREFIX = 'zip-';
-var CACHE = PREFIX + 'v4';
+var CACHE = PREFIX + 'v5';
 // The cache name this app used before versioning
 var OLD_CACHE = 'cache-and-update-zip';
 
@@ -56,8 +56,13 @@ var downloads = {};
 self.addEventListener('message', function(evt) {
   // Any message counts as activity, so the page's 'keepalive' messages while a zip streams stop this worker
   // being stopped for looking idle. They need nothing else doing
+  // The page gave up waiting for the download to start, so stop making the zip
   if (evt.data && evt.data.type === 'forget') {
-    delete downloads[evt.data.id];
+    var forgotten = downloads[evt.data.id];
+    if (forgotten) {
+      forgotten.zip.postMessage('cancelled');
+      delete downloads[evt.data.id];
+    }
     return;
   }
   if (!evt.data || evt.data.type !== 'download') {
@@ -97,7 +102,7 @@ self.addEventListener('message', function(evt) {
       zip.postMessage('cancelled');
     }
   }, {highWaterMark: 4});
-  downloads[id] = {stream: stream, name: evt.data.name, page: evt.ports[1]};
+  downloads[id] = {stream: stream, name: evt.data.name, page: evt.ports[1], zip: zip};
   evt.ports[1].postMessage('ready');
   // Forget it if the browser never asks for it
   setTimeout(function() {

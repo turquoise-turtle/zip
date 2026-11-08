@@ -148,7 +148,7 @@ function handleFolder(folderName, items, again) {
 	//stream it straight into the download where the browser can, otherwise build it in memory
 	(canStream() ? streamFolder(items, name, progress, again) : Promise.resolve(null))
 	.then(function(result) {
-		return result || startTask({type: 'folder', items: items}, progress);
+		return result || runOnPage({type: 'folder', items: items}, progress);
 	})
 	.then(function(result) {
 		var kept = showLists(result.entries);
@@ -245,7 +245,7 @@ function streamFolder(items, name, onProgress, now) {
 		clearInterval(keepAlive);
 	}
 	
-	var finished = startTask({type: 'folder', items: items, port: zip.port2}, function(percent) {
+	var finished = runOnPage({type: 'folder', items: items, port: zip.port2}, function(percent) {
 		startDownload();
 		onProgress(percent);
 	}).then(function(result) {
@@ -262,11 +262,12 @@ function streamFolder(items, name, onProgress, now) {
 		return started || true;
 	}).then(function(ok) {
 		if (!ok) {
-			cancelTask();
-			//so a download the browser starts late (say, once the user allows it) fails rather than hangs
+			//stops the zip, and makes a download the browser starts late (say, once the user allows it) fail
+			//rather than hang
 			if (navigator.serviceWorker.controller) {
 				navigator.serviceWorker.controller.postMessage({type: 'forget', id: id});
 			}
+			finished.catch(function() {});
 			return null;
 		}
 		return finished;
@@ -427,7 +428,7 @@ var workerFailed = false;
 var jobCount = 0;
 var current = null;
 
-//task is {type: 'clean', file} or {type: 'folder', items}, see runTask in clean.js
+//task is {type: 'clean', file}, see runTask in clean.js
 function startTask(task, onProgress) {
 	return new Promise(function(resolve, reject) {
 		//a new job replaces one that's still going
@@ -440,20 +441,19 @@ function startTask(task, onProgress) {
 	});
 }
 
-//stops the current job, if it's in the worker (a job running on the page just never finishes)
-function cancelTask() {
-	if (worker) {
-		worker.terminate();
-		worker = null;
-	}
-	current = null;
+//folders are zipped on the page rather than in the worker, because handing a worker 130,000 files takes
+//Chrome 13 seconds, during which the page can't even show that it's started. the slow parts (reading the
+//files and compressing them) happen off the page's thread anyway
+function runOnPage(task, onProgress) {
+	return loadMainThread().then(function() {
+		return runTask(task, onProgress);
+	});
 }
 
 function startJob(job) {
 	var w = getWorker();
 	if (w) {
-		//a streamed folder's port has to be handed over to the worker rather than copied
-		w.postMessage({id: job.id, task: job.task}, job.task.port ? [job.task.port] : []);
+		w.postMessage({id: job.id, task: job.task});
 		return;
 	}
 	loadMainThread()
