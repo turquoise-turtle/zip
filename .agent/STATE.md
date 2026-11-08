@@ -25,6 +25,10 @@ See DECISIONS.md, "How folder zips get to the download". Verified: `uv run pytes
 
 Next: nothing is pending. The remaining unapproved ideas are Q6 (several zips at once) and Q7 (choose what to remove) in IMPROVEMENTS.md.
 
+## Big-folder progress fix (committed with this note)
+
+- The fix for slow first progress on big folders: see DECISIONS.md, "Big folders: show progress straight away". Verified: `uv run pytest` gives 175 passed, 3 skipped, and `uv run pytest -m slow` gives 30 passed (9 min 52 s).
+
 ## Known quirks
 
 - Headless WebKit on macOS stalls about 30 seconds on Playwright's first "wait until stable" action, even on a blank page, so tests pass `force=True` to clicks and checks. It also hardly paints, so `wait_for_function` uses `polling=100` and screenshots come out blank.
